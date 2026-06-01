@@ -12,11 +12,11 @@ def run_portfolio_simulation(
     num_trials=1000,
     expected_returns=None,
     volatilities=None,
-    correlation_matrix=None
+    correlation_matrix=None,
+    target_hurdle=None
 ):
     # Fallback to standard 4 assets if not provided dynamically
     if expected_returns is None or volatilities is None or correlation_matrix is None:
-        # Default 4 assets: Stocks, Bonds, Cash, Real Estate
         expected_returns = np.array([0.090, 0.045, 0.025, 0.065])
         volatilities = np.array([0.160, 0.060, 0.010, 0.090])
         correlation_matrix = np.array([
@@ -30,12 +30,8 @@ def run_portfolio_simulation(
     
     num_assets = len(expected_returns)
     
-    # Standardize weights
     if allocations is None:
         allocations = np.ones(num_assets) / num_assets
-    elif isinstance(allocations, dict):
-        # If mapping from dict, convert to list aligning with asset keys
-        raise ValueError("allocations must be a NumPy weights vector matching assets order")
     else:
         allocations = np.array(allocations)
         
@@ -46,25 +42,19 @@ def run_portfolio_simulation(
         allocations = allocations / total_weight
 
     # Ensure correlation matrix is positive semi-definite (PSD)
-    # Check eigenvalues
     eigvals, eigvecs = np.linalg.eigh(correlation_matrix)
     if np.any(eigvals < 0):
-        # Repair correlation matrix (Higham's method or thresholding)
         eigvals = np.maximum(eigvals, 1e-8)
         correlation_matrix = eigvecs @ np.diag(eigvals) @ eigvecs.T
-        # Normalize diagonal back to 1.0
         d = np.sqrt(np.diag(correlation_matrix))
         correlation_matrix = correlation_matrix / d[:, None] / d[None, :]
 
     # Construct Covariance Matrix
     cov_matrix = np.diag(volatilities) @ correlation_matrix @ np.diag(volatilities)
     
-    # Generate joint returns for all trials and years
-    # Shape: (num_trials, years, num_assets)
+    # Generate joint returns
     sim_returns = np.random.multivariate_normal(expected_returns, cov_matrix, size=(num_trials, years))
     
-    # Matrix to store portfolio values over time (years 0 to years)
-    # Shape: (num_trials, years + 1)
     portfolio_paths = np.zeros((num_trials, years + 1))
     portfolio_paths[:, 0] = initial_portfolio_value
     
@@ -91,7 +81,7 @@ def run_portfolio_simulation(
         vals_after_contrib = np.where(active_mask, prev_vals + contrib, 0.0)
         
         # Apply returns based on asset allocation
-        returns_t = sim_returns[:, year_idx, :] # (num_trials, num_assets)
+        returns_t = sim_returns[:, year_idx, :]
         growth_factors = 1.0 + (returns_t @ allocations)
         
         vals_after_growth = vals_after_contrib * growth_factors
@@ -108,16 +98,25 @@ def run_portfolio_simulation(
         portfolio_paths[:, t] = final_vals_t
 
     # --- AGGREGATION & STATISTICS ---
-    success_rates = np.mean(portfolio_paths > 0, axis=0) * 100.0
+    # Set default target hurdle for Capital Preservation Goal
+    if target_hurdle is None:
+        target_hurdle = initial_portfolio_value
+
+    # Compute Nominal Success rates (paths meeting/exceeding nominal target hurdle)
+    success_rates_nominal = np.mean(portfolio_paths >= target_hurdle, axis=0) * 100.0
+    
+    # Calculate inflation-adjusted paths for real spending power
+    inflation_factors = (1.0 + inflation_rate) ** np.arange(years + 1)
+    real_portfolio_paths = portfolio_paths / inflation_factors
+    
+    # Compute Real Success rates (paths meeting/exceeding real target hurdle)
+    success_rates_real = np.mean(real_portfolio_paths >= target_hurdle, axis=0) * 100.0
     
     percentiles = [10, 25, 50, 75, 90]
     paths_percentiles = {}
     for p in percentiles:
         paths_percentiles[f'p{p}'] = np.percentile(portfolio_paths, p, axis=0)
         
-    inflation_factors = (1.0 + inflation_rate) ** np.arange(years + 1)
-    real_portfolio_paths = portfolio_paths / inflation_factors
-    
     real_percentiles = {}
     for p in percentiles:
         real_percentiles[f'p{p}'] = np.percentile(real_portfolio_paths, p, axis=0)
@@ -144,8 +143,12 @@ def run_portfolio_simulation(
         
     return {
         'years_list': list(range(years + 1)),
-        'success_rates': success_rates.tolist(),
-        'success_rate_terminal': float(success_rates[-1]),
+        'success_rates': success_rates_nominal.tolist(), # Backward compatibility
+        'success_rates_nominal': success_rates_nominal.tolist(),
+        'success_rates_real': success_rates_real.tolist(),
+        'success_rate_terminal': float(success_rates_real[-1]), # Default terminal is real success
+        'success_rate_terminal_nominal': float(success_rates_nominal[-1]),
+        'success_rate_terminal_real': float(success_rates_real[-1]),
         'beating_inflation_rate': float(beating_inflation),
         'avg_failure_year': avg_failure_year,
         'nominal_paths': {k: v.tolist() for k, v in paths_percentiles.items()},
@@ -153,6 +156,7 @@ def run_portfolio_simulation(
         'histogram': hist_data,
         'summary': {
             'initial_value': initial_portfolio_value,
+            'target_hurdle': target_hurdle,
             'median_terminal_nominal': float(paths_percentiles['p50'][-1]),
             'median_terminal_real': float(real_percentiles['p50'][-1]),
             'p10_terminal_nominal': float(paths_percentiles['p10'][-1]),

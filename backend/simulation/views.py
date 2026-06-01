@@ -22,6 +22,11 @@ class SimulatePortfolioView(APIView):
             
             # Portfolio mix type selection
             portfolio_type = data.get('portfolio_type', 'Balanced')
+            target_hurdle = data.get('target_hurdle')
+            if target_hurdle is not None:
+                target_hurdle = float(target_hurdle)
+            else:
+                target_hurdle = initial_val
             
             # Validate core values
             if initial_val < 0 or years <= 0 or annual_contrib < 0 or annual_withdr < 0:
@@ -63,7 +68,8 @@ class SimulatePortfolioView(APIView):
                 num_trials=num_trials,
                 expected_returns=expected_returns,
                 volatilities=volatilities,
-                correlation_matrix=correlation_matrix
+                correlation_matrix=correlation_matrix,
+                target_hurdle=target_hurdle
             )
             
             # Append portfolio info to results for frontend metadata display
