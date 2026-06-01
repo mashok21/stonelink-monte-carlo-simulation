@@ -187,23 +187,36 @@ def parse_portfolio_excel():
                 
         # Parse weights
         weights_dict = {}
-        model_names = ['Min Risk', 'Balanced', 'Growth', 'High Return']
-        for model in model_names:
-            # Match columns case-insensitively and remove whitespace
-            col_match = [
-                c for c in df_weights.columns 
-                if model.lower().replace(" ", "") in str(c).lower().replace(" ", "")
-            ]
-            if col_match:
-                w_vec = df_weights[col_match[0]].to_numpy(dtype=float)
+        mapping = {
+            'Min Risk': 'Portfolio 1\n(Min Risk)',
+            'Balanced': 'Portfolio 2\n(Balanced)',
+            'Growth': 'Portfolio 3\n(Growth)',
+            'High Return': 'Portfolio 4\n(High Return)'
+        }
+        
+        for short_name, exact_col in mapping.items():
+            found_col = None
+            for col in df_weights.columns:
+                c_clean = str(col).replace('\r', '').replace('\n', ' ').strip().lower()
+                exact_clean = exact_col.replace('\r', '').replace('\n', ' ').strip().lower()
+                short_clean = short_name.replace('\r', '').replace('\n', ' ').strip().lower()
+                
+                # Check exact match or substring match
+                if c_clean == exact_clean or short_clean in c_clean:
+                    found_col = col
+                    break
+            
+            if found_col is not None:
+                w_vec = df_weights[found_col].to_numpy(dtype=float)
                 w_vec = np.nan_to_num(w_vec, nan=0.0)
+                # If weights sum to > 2.0, convert from percentages to decimal fractions
                 if np.sum(w_vec) > 2.0:
                     w_vec = w_vec / 100.0
-                weights_dict[model] = w_vec
+                weights_dict[short_name] = w_vec
             else:
-                # Fallback to balanced / first asset
-                weights_dict[model] = np.zeros(len(asset_names))
-                weights_dict[model][0] = 1.0
+                # Fallback if missing
+                weights_dict[short_name] = np.zeros(len(asset_names))
+                weights_dict[short_name][0] = 1.0
                 
         return {
             'asset_names': asset_names,
