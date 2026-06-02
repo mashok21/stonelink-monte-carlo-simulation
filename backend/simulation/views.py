@@ -27,6 +27,9 @@ class SimulatePortfolioView(APIView):
                 target_hurdle = float(target_hurdle)
             else:
                 target_hurdle = initial_val
+                
+            # Simulation environment mode (STANDARD_CRUISE or MARKET_STRESS)
+            environment_mode = data.get('environment_mode', 'STANDARD_CRUISE')
             
             # Validate core values
             if initial_val < 0 or years <= 0 or annual_contrib < 0 or annual_withdr < 0:
@@ -46,6 +49,8 @@ class SimulatePortfolioView(APIView):
             volatilities = excel_data['volatilities']
             correlation_matrix = excel_data['correlation_matrix']
             portfolio_weights = excel_data['portfolio_weights']
+            asset_classes = excel_data.get('asset_classes')
+            unsmoothing_factor = excel_data.get('unsmoothing_factor', 1.4)
             
             # Extract allocation weights corresponding to the portfolio_type
             if portfolio_type in portfolio_weights:
@@ -69,7 +74,10 @@ class SimulatePortfolioView(APIView):
                 expected_returns=expected_returns,
                 volatilities=volatilities,
                 correlation_matrix=correlation_matrix,
-                target_hurdle=target_hurdle
+                target_hurdle=target_hurdle,
+                environment_mode=environment_mode,
+                asset_classes=asset_classes,
+                unsmoothing_factor=unsmoothing_factor
             )
             
             # Append portfolio info to results for frontend metadata display

@@ -13,7 +13,10 @@ def run_portfolio_simulation(
     expected_returns=None,
     volatilities=None,
     correlation_matrix=None,
-    target_hurdle=None
+    target_hurdle=None,
+    environment_mode='STANDARD_CRUISE',
+    asset_classes=None,
+    unsmoothing_factor=1.4
 ):
     # Fallback to standard 4 assets if not provided dynamically
     if expected_returns is None or volatilities is None or correlation_matrix is None:
@@ -27,7 +30,9 @@ def run_portfolio_simulation(
         ])
         if allocations is None:
             allocations = np.array([0.60, 0.30, 0.05, 0.05])
-    
+        if asset_classes is None:
+            asset_classes = ['equity', 'fixed_income', 'fixed_income', 'equity']
+            
     num_assets = len(expected_returns)
     
     if allocations is None:
@@ -41,6 +46,13 @@ def run_portfolio_simulation(
     else:
         allocations = allocations / total_weight
 
+    # --- VOLATILITY UNSMOOTHING FOR PRIVATE ASSETS ---
+    vols_adjusted = volatilities.copy()
+    if asset_classes is not None:
+        for i, ac in enumerate(asset_classes):
+            if ac == 'private':
+                vols_adjusted[i] *= unsmoothing_factor
+
     # Ensure correlation matrix is positive semi-definite (PSD)
     eigvals, eigvecs = np.linalg.eigh(correlation_matrix)
     if np.any(eigvals < 0):
@@ -49,12 +61,45 @@ def run_portfolio_simulation(
         d = np.sqrt(np.diag(correlation_matrix))
         correlation_matrix = correlation_matrix / d[:, None] / d[None, :]
 
-    # Construct Covariance Matrix
-    cov_matrix = np.diag(volatilities) @ correlation_matrix @ np.diag(volatilities)
+    # Compute Cholesky decomposition factor L (where L @ L.T = Correlation Matrix)
+    # This factor is used to inject correlation into independent random draws.
+    L = np.linalg.cholesky(correlation_matrix)
     
-    # Generate joint returns
-    sim_returns = np.random.multivariate_normal(expected_returns, cov_matrix, size=(num_trials, years))
+    # Generate joint returns based on simulation environment mode
+    # Draw independent standard normal random variables
+    Z = np.random.normal(0, 1, size=(num_trials, years, num_assets))
     
+    # Transform independent standard normals to correlated standard normals
+    # X_ij = sum_k Z_ik * L_jk
+    # We flatten Z to (num_trials * years, num_assets) for fast matrix multiplication
+    Z_flat = Z.reshape(-1, num_assets)
+    X_flat = Z_flat @ L.T
+    X = X_flat.reshape(num_trials, years, num_assets)
+    
+    # Apply distribution branching logic based on the environment mode
+    if environment_mode == 'MARKET_STRESS':
+        # Apply Multivariate Student-t Distribution (df=4) to Liquid Equities
+        # Generate independent Chi-Squared random variables: W ~ Chi2(df=4)
+        W = np.random.chisquare(df=4, size=(num_trials, years, 1))
+        # Protect against division by zero
+        W = np.maximum(W, 1e-6)
+        scale_factors = np.sqrt(W / 4.0) # shape: (num_trials, years, 1)
+        
+        # Branching per asset: equities divide by scale factor (Student-t),
+        # bonds and private assets remain normal.
+        for j in range(num_assets):
+            a_class = asset_classes[j] if (asset_classes is not None and j < len(asset_classes)) else 'equity'
+            if a_class == 'equity':
+                X[:, :, j] = X[:, :, j] / scale_factors[:, :, 0]
+                # Inject a slight downward shift/drift during Stress Test to simulate a market crash
+                # Let's subtract a small crash premium of 2.0% pa to stress test the portfolios
+                X[:, :, j] -= 0.02
+
+    # Scale to expected returns and adjusted volatilities
+    sim_returns = expected_returns + X * vols_adjusted
+    
+    # Matrix to store portfolio values over time (years 0 to years)
+    # Shape: (num_trials, years + 1)
     portfolio_paths = np.zeros((num_trials, years + 1))
     portfolio_paths[:, 0] = initial_portfolio_value
     
@@ -98,18 +143,17 @@ def run_portfolio_simulation(
         portfolio_paths[:, t] = final_vals_t
 
     # --- AGGREGATION & STATISTICS ---
-    # Set default target hurdle for Capital Preservation Goal
     if target_hurdle is None:
         target_hurdle = initial_portfolio_value
 
-    # Compute Nominal Success rates (paths meeting/exceeding nominal target hurdle)
+    # Compute Nominal Success rates
     success_rates_nominal = np.mean(portfolio_paths >= target_hurdle, axis=0) * 100.0
     
     # Calculate inflation-adjusted paths for real spending power
     inflation_factors = (1.0 + inflation_rate) ** np.arange(years + 1)
     real_portfolio_paths = portfolio_paths / inflation_factors
     
-    # Compute Real Success rates (paths meeting/exceeding real target hurdle)
+    # Compute Real Success rates
     success_rates_real = np.mean(real_portfolio_paths >= target_hurdle, axis=0) * 100.0
     
     percentiles = [10, 25, 50, 75, 90]
@@ -143,10 +187,10 @@ def run_portfolio_simulation(
         
     return {
         'years_list': list(range(years + 1)),
-        'success_rates': success_rates_nominal.tolist(), # Backward compatibility
+        'success_rates': success_rates_nominal.tolist(),
         'success_rates_nominal': success_rates_nominal.tolist(),
         'success_rates_real': success_rates_real.tolist(),
-        'success_rate_terminal': float(success_rates_real[-1]), # Default terminal is real success
+        'success_rate_terminal': float(success_rates_real[-1]),
         'success_rate_terminal_nominal': float(success_rates_nominal[-1]),
         'success_rate_terminal_real': float(success_rates_real[-1]),
         'beating_inflation_rate': float(beating_inflation),

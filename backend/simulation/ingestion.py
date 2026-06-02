@@ -39,6 +39,12 @@ def generate_default_excel(filepath):
             'REITs', 'Commodities', 'Gold', 'Cash Equivalents', 'Infrastructure', 'Private Equity',
             'Hedge Funds', 'Cryptocurrencies'
         ],
+        'Category': [
+            'Public Equity', 'Public Equity', 'Public Equity', 'Public Equity', 'Public Equity',
+            'Fixed Income', 'Fixed Income', 'Fixed Income', 'Fixed Income', 'Fixed Income',
+            'Hard Assets', 'Commodities', 'Commodities', 'Fixed Income', 'Hard Assets', 'Private Equity',
+            'Credit', 'Public Equity'
+        ],
         'Expected Return (pa)': [
             8.5, 9.0, 9.5, 7.5, 9.5, 
             5.5, 4.0, 2.5, 3.5, 6.0, 
@@ -66,10 +72,19 @@ def generate_default_excel(filepath):
     }
     df_weights = pd.DataFrame(weights_data)
     
+    # Simple simulation settings defaults
+    settings_data = {
+        'Setting': ['Starting Portfolio Value', 'Unsmoothing Factor', 'NAV Smoothing Correction'],
+        'Value': [100000, 1.4, 'Yes'],
+        'Description': ['Default AUM', 'Unsmoothing multiplier', 'Apply multiplier']
+    }
+    df_settings = pd.DataFrame(settings_data)
+
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
         df_params.to_excel(writer, sheet_name='Asset Parameters', index=False)
         df_corr.to_excel(writer, sheet_name='Correlation Matrix', index=True)
         df_weights.to_excel(writer, sheet_name='Portfolio Weights', index=False)
+        df_settings.to_excel(writer, sheet_name='Simulation Settings', index=False)
 
 def parse_portfolio_excel():
     filepath = get_excel_path()
@@ -83,11 +98,15 @@ def parse_portfolio_excel():
             sheet_names = xls.sheet_names
             
             # Verify required sheets exist (case-insensitive check)
-            required_sheets = ['Asset Parameters', 'Correlation Matrix', 'Portfolio Weights']
+            required_sheets = ['Asset Parameters', 'Correlation Matrix', 'Portfolio Weights', 'Simulation Settings']
             matched_sheets = {}
             for req in required_sheets:
                 match = [s for s in sheet_names if s.strip().lower() == req.lower()]
                 if not match:
+                    # Simulation Settings is optional for backward compatibility
+                    if req == 'Simulation Settings':
+                        matched_sheets[req] = None
+                        continue
                     raise ValueError(f"Required sheet '{req}' not found. Available sheets: {sheet_names}")
                 matched_sheets[req] = match[0]
             
@@ -104,14 +123,11 @@ def parse_portfolio_excel():
             # 2. Load Correlation Matrix and detect header row
             df_raw_corr = pd.read_excel(xls, sheet_name=matched_sheets['Correlation Matrix'], header=None)
             header_idx_corr = 0
-            # Look for row containing any non-null strings that correspond to asset names
             for idx, row in df_raw_corr.iterrows():
                 row_str = [str(x).strip().lower() for x in row.values]
-                # If row contains common asset indicators
                 if any(x in row_str for x in ['asset', 'india equity etf', 'us large cap']):
                     header_idx_corr = idx
                     break
-            # Fallback check: find first row where element 1 is a valid string
             if header_idx_corr == 0:
                 for idx, row in df_raw_corr.iterrows():
                     val = str(row.iloc[1]).strip() if len(row) > 1 else ''
@@ -129,6 +145,19 @@ def parse_portfolio_excel():
                     header_idx_weights = idx
                     break
             df_weights = pd.read_excel(xls, sheet_name=matched_sheets['Portfolio Weights'], header=header_idx_weights)
+            
+            # 4. Load Simulation Settings and check for Unsmoothing Factor
+            unsmoothing_factor = 1.4
+            if matched_sheets['Simulation Settings'] is not None:
+                df_settings = pd.read_excel(xls, sheet_name=matched_sheets['Simulation Settings'], header=None)
+                for idx, row in df_settings.iterrows():
+                    first_cell = str(row.iloc[0]).strip().lower()
+                    if 'unsmoothing factor' in first_cell:
+                        try:
+                            unsmoothing_factor = float(row.iloc[1])
+                        except Exception:
+                            pass
+                        break
         
         # --- PROCESS ASSET PARAMETERS ---
         param_cols = df_params.columns.tolist()
@@ -136,6 +165,10 @@ def parse_portfolio_excel():
         if not asset_col_match:
             raise ValueError(f"Could not find an 'Asset Class' column in 'Asset Parameters' sheet. Available columns: {param_cols}")
         asset_col = asset_col_match[0]
+        
+        # Category Column
+        cat_col_match = [c for c in param_cols if 'category' in str(c).lower() or 'cat' in str(c).lower()]
+        cat_col = cat_col_match[0] if cat_col_match else None
         
         ret_col_match = [c for c in param_cols if 'return' in str(c).lower() or 'ret' in str(c).lower()]
         vol_col_match = [c for c in param_cols if 'volatility' in str(c).lower() or 'vol' in str(c).lower()]
@@ -149,13 +182,37 @@ def parse_portfolio_excel():
         df_params = df_params.dropna(subset=[asset_col])
         asset_names = df_params[asset_col].astype(str).str.strip().tolist()
         
+        # Determine asset categories
+        categories = []
+        if cat_col:
+            categories = df_params[cat_col].astype(str).str.strip().tolist()
+        else:
+            categories = ['Public Equity'] * len(asset_names)
+            
+        # Classify asset classes into: equity, fixed_income, private
+        asset_classes = []
+        for cat in categories:
+            cat_lower = cat.lower()
+            if cat_lower in ['public equity', 'dynamic', 'commodities', 'hard assets']:
+                asset_classes.append('equity')
+            elif cat_lower in ['fixed income', 'fixed_income']:
+                asset_classes.append('fixed_income')
+            elif cat_lower in ['private equity', 'credit', 'private_equity']:
+                asset_classes.append('private')
+            else:
+                # Fallback based on text match
+                if 'equity' in cat_lower or 'etf' in cat_lower or 'mf' in cat_lower or 'metals' in cat_lower or 'invit' in cat_lower:
+                    asset_classes.append('equity')
+                elif 'bond' in cat_lower or 'treasur' in cat_lower or 'cash' in cat_lower:
+                    asset_classes.append('fixed_income')
+                else:
+                    asset_classes.append('private')
+        
         # --- PROCESS CORRELATION MATRIX ---
         corr_cols = df_corr.columns.tolist()
         df_corr = df_corr.set_index(corr_cols[0])
         df_corr.index = df_corr.index.astype(str).str.strip()
         df_corr.columns = df_corr.columns.astype(str).str.strip()
-        
-        # Align correlations to match the exact order of asset names
         df_corr = df_corr.reindex(index=asset_names, columns=asset_names)
         
         corr_matrix = df_corr.to_numpy(dtype=float)
@@ -173,19 +230,15 @@ def parse_portfolio_excel():
         df_weights.index = df_weights.index.astype(str).str.strip()
         df_weights = df_weights.reindex(asset_names)
         
-        # Parse return and volatility numeric values
         returns_val = df_params[ret_col].to_numpy(dtype=float)
         vols_val = df_params[vol_col].to_numpy(dtype=float)
         
-        # Detect percentage formatting vs float decimals
-        # If returns average > 0.5 (e.g. 8.5% is written as 8.5 rather than 0.085), divide by 100
         if np.any(returns_val > 1.0) or np.any(vols_val > 1.0):
             if np.mean(returns_val) > 0.5:
                 returns_val = returns_val / 100.0
             if np.mean(vols_val) > 0.5:
                 vols_val = vols_val / 100.0
                 
-        # Parse weights
         weights_dict = {}
         mapping = {
             'Min Risk': 'Portfolio 1\n(Min Risk)',
@@ -201,7 +254,6 @@ def parse_portfolio_excel():
                 exact_clean = exact_col.replace('\r', '').replace('\n', ' ').strip().lower()
                 short_clean = short_name.replace('\r', '').replace('\n', ' ').strip().lower()
                 
-                # Check exact match or substring match
                 if c_clean == exact_clean or short_clean in c_clean:
                     found_col = col
                     break
@@ -209,12 +261,10 @@ def parse_portfolio_excel():
             if found_col is not None:
                 w_vec = df_weights[found_col].to_numpy(dtype=float)
                 w_vec = np.nan_to_num(w_vec, nan=0.0)
-                # If weights sum to > 2.0, convert from percentages to decimal fractions
                 if np.sum(w_vec) > 2.0:
                     w_vec = w_vec / 100.0
                 weights_dict[short_name] = w_vec
             else:
-                # Fallback if missing
                 weights_dict[short_name] = np.zeros(len(asset_names))
                 weights_dict[short_name][0] = 1.0
                 
@@ -223,7 +273,9 @@ def parse_portfolio_excel():
             'expected_returns': returns_val,
             'volatilities': vols_val,
             'correlation_matrix': corr_matrix,
-            'portfolio_weights': weights_dict
+            'portfolio_weights': weights_dict,
+            'asset_classes': asset_classes,
+            'unsmoothing_factor': unsmoothing_factor
         }
         
     except Exception as e:
