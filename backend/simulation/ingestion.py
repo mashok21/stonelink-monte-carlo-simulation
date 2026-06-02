@@ -1,12 +1,12 @@
 import os
 import pandas as pd
 import numpy as np
+from django.conf import settings
 
-EXCEL_FILENAME = 'portfolio_data.xlsx'
+EXCEL_PATH = os.path.join(settings.BASE_DIR, 'simulation', 'portfolio_data.xlsx')
 
 def get_excel_path():
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_dir, EXCEL_FILENAME)
+    return EXCEL_PATH
 
 def make_default_correlation_matrix(asset_names):
     n = len(asset_names)

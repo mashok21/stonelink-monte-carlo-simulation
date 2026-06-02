@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-&fnw2akc&it)+q9)dtcq()n#+x(dh*)(eaqu-pc=-oz5&60kub
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'ashok21aug.pythonanywhere.com']
 
 
 # Application definition
@@ -53,7 +53,10 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "https://mashok21.github.io"
+]
 
 
 ROOT_URLCONF = 'stonelink_backend.urls'
