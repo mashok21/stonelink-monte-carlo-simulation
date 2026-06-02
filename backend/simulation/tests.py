@@ -148,3 +148,26 @@ class PortfolioSimulationTestCase(TestCase):
         invalid_payload['initial_portfolio_value'] = -100
         bad_response = self.client.post(self.url, data=invalid_payload, content_type='application/json')
         self.assertEqual(bad_response.status_code, 400)
+
+    def test_market_stress_mode(self):
+        """Test POST request with environment_mode: MARKET_STRESS and verify that calculations branch into Multivariate Student-t distribution without crashing."""
+        payload = {
+            "initial_portfolio_value": 150000,
+            "years": 10,
+            "num_trials": 200,
+            "portfolio_type": "Balanced",
+            "environment_mode": "MARKET_STRESS",
+            "annual_contribution": 10000,
+            "annual_withdrawal": 5000,
+            "withdrawal_start_year": 5
+        }
+        
+        response = self.client.post(self.url, data=payload, content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        
+        res_data = response.json()
+        self.assertEqual(res_data['portfolio_type'], 'Balanced')
+        self.assertIn('summary', res_data)
+        self.assertIn('success_rates_real', res_data)
+        self.assertTrue(res_data['summary']['median_terminal_nominal'] >= 0)
+
