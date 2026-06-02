@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-&fnw2akc&it)+q9)dtcq()n#+x(dh*)(eaqu-pc=-oz5&60kub
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'ashok21aug.pythonanywhere.com']
+ALLOWED_HOSTS = ['ashok21aug.pythonanywhere.com', 'localhost', '127.0.0.1']
 
 
 # Application definition
@@ -54,8 +54,8 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "https://mashok21.github.io"
+    'https://stonelink-monte-carlo-simulation-fr.vercel.app',
+    'http://localhost:3000',
 ]
 
 
