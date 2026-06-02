@@ -93,6 +93,18 @@ class SimulatePortfolioView(APIView):
                 if weight > 0 # Only send non-zero allocations to keep payload neat
             ]
             
+            # Full correlation matrix and asset list for covariance network visualizer
+            results['correlation_matrix'] = correlation_matrix.tolist()
+            results['all_assets'] = [
+                {
+                    'name': name,
+                    'weight': float(weight * 100.0),
+                    'return': float(ret * 100.0),
+                    'volatility': float(vol * 100.0)
+                }
+                for name, weight, ret, vol in zip(asset_names, allocations, expected_returns, volatilities)
+            ]
+            
             return Response(results, status=status.HTTP_200_OK)
             
         except ValueError as ve:
