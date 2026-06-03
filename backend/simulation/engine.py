@@ -16,8 +16,12 @@ def run_portfolio_simulation(
     target_hurdle=None,
     environment_mode='STANDARD_CRUISE',
     asset_classes=None,
-    unsmoothing_factor=1.4
+    unsmoothing_factor=1.4,
+    use_fixed_seed=True
 ):
+    seed_value = 42 if use_fixed_seed else None
+    rng = np.random.default_rng(seed_value)
+    
     # Fallback to standard 4 assets if not provided dynamically
     if expected_returns is None or volatilities is None or correlation_matrix is None:
         expected_returns = np.array([0.090, 0.045, 0.025, 0.065])
@@ -67,7 +71,7 @@ def run_portfolio_simulation(
     
     # Generate joint returns based on simulation environment mode
     # Draw independent standard normal random variables
-    Z = np.random.normal(0, 1, size=(num_trials, years, num_assets))
+    Z = rng.normal(0, 1, size=(num_trials, years, num_assets))
     
     # Transform independent standard normals to correlated standard normals
     # X_ij = sum_k Z_ik * L_jk
@@ -80,7 +84,7 @@ def run_portfolio_simulation(
     if environment_mode == 'MARKET_STRESS':
         # Apply Multivariate Student-t Distribution (df=4) to Liquid Equities
         # Generate independent Chi-Squared random variables: W ~ Chi2(df=4)
-        W = np.random.chisquare(df=4, size=(num_trials, years, 1))
+        W = rng.chisquare(df=4, size=(num_trials, years, 1))
         # Protect against division by zero
         W = np.maximum(W, 1e-6)
         scale_factors = np.sqrt(W / 4.0) # shape: (num_trials, years, 1)

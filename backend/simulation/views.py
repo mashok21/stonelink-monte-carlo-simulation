@@ -36,11 +36,6 @@ class SimulatePortfolioView(APIView):
             if isinstance(use_fixed_seed, str):
                 use_fixed_seed = use_fixed_seed.lower() == 'true'
             
-            if use_fixed_seed:
-                np.random.seed(42)  # Lock the matrix path baseline
-            else:
-                np.random.seed(None) # Reset to standard random system entropy
-            
             # Validate core values
             if initial_val < 0 or years <= 0 or annual_contrib < 0 or annual_withdr < 0:
                 return Response(
@@ -87,7 +82,8 @@ class SimulatePortfolioView(APIView):
                 target_hurdle=target_hurdle,
                 environment_mode=environment_mode,
                 asset_classes=asset_classes,
-                unsmoothing_factor=unsmoothing_factor
+                unsmoothing_factor=unsmoothing_factor,
+                use_fixed_seed=use_fixed_seed
             )
             
             # Append portfolio info to results for frontend metadata display
