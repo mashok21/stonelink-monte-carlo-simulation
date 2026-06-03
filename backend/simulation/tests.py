@@ -171,3 +171,51 @@ class PortfolioSimulationTestCase(TestCase):
         self.assertIn('success_rates_real', res_data)
         self.assertTrue(res_data['summary']['median_terminal_nominal'] >= 0)
 
+    def test_simulation_seed_reproducibility(self):
+        """Test that using a fixed seed yields perfectly reproducible outcomes, while disabling the fixed seed yields variance."""
+        payload = {
+            "initial_portfolio_value": 150000,
+            "years": 10,
+            "num_trials": 200,
+            "portfolio_type": "Balanced",
+            "annual_contribution": 10000,
+            "annual_withdrawal": 5000,
+            "withdrawal_start_year": 5,
+            "use_fixed_seed": True
+        }
+        
+        # Call 1 with fixed seed
+        response1 = self.client.post(self.url, data=payload, content_type='application/json')
+        self.assertEqual(response1.status_code, 200)
+        res_data1 = response1.json()
+        
+        # Call 2 with fixed seed
+        response2 = self.client.post(self.url, data=payload, content_type='application/json')
+        self.assertEqual(response2.status_code, 200)
+        res_data2 = response2.json()
+        
+        # Assert they are identical
+        self.assertEqual(
+            res_data1['summary']['median_terminal_nominal'],
+            res_data2['summary']['median_terminal_nominal']
+        )
+        self.assertEqual(
+            res_data1['success_rates_real'],
+            res_data2['success_rates_real']
+        )
+        
+        # Call with use_fixed_seed=False
+        payload_no_seed = payload.copy()
+        payload_no_seed['use_fixed_seed'] = False
+        
+        response3 = self.client.post(self.url, data=payload_no_seed, content_type='application/json')
+        self.assertEqual(response3.status_code, 200)
+        res_data3 = response3.json()
+        
+        # Free-variance is expected to produce a different result than fixed seed
+        self.assertNotEqual(
+            res_data1['summary']['median_terminal_nominal'],
+            res_data3['summary']['median_terminal_nominal']
+        )
+
+

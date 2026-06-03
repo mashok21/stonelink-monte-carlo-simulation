@@ -31,6 +31,16 @@ class SimulatePortfolioView(APIView):
             # Simulation environment mode (STANDARD_CRUISE or MARKET_STRESS)
             environment_mode = data.get('environment_mode', 'STANDARD_CRUISE')
             
+            # Simulation seed control (standardized baseline or live variance)
+            use_fixed_seed = data.get('use_fixed_seed', True)
+            if isinstance(use_fixed_seed, str):
+                use_fixed_seed = use_fixed_seed.lower() == 'true'
+            
+            if use_fixed_seed:
+                np.random.seed(42)  # Lock the matrix path baseline
+            else:
+                np.random.seed(None) # Reset to standard random system entropy
+            
             # Validate core values
             if initial_val < 0 or years <= 0 or annual_contrib < 0 or annual_withdr < 0:
                 return Response(
