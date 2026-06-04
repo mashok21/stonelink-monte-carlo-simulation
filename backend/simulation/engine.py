@@ -3,9 +3,8 @@ import numpy as np
 def run_portfolio_simulation(
     initial_portfolio_value=100000,
     years=30,
-    annual_contribution=5000,
-    annual_contribution_growth=0.03,
-    annual_withdrawal=12000,
+    contribution_rate=0.03,
+    distribution_rate=0.04,
     withdrawal_start_year=15,
     inflation_rate=0.025,
     allocations=None, # NumPy weight vector corresponding to the assets
@@ -112,31 +111,28 @@ def run_portfolio_simulation(
     
     for t in range(1, years + 1):
         year_idx = t - 1
-        inflation_multiplier = (1.0 + inflation_rate) ** year_idx
         
-        # Contribution (at start of the year)
+        prev_vals = portfolio_paths[:, t - 1]
+        
+        # Apply returns based on asset allocation to calculate pre-cash-flow year-end values
+        returns_t = sim_returns[:, year_idx, :]
+        growth_factors = 1.0 + (returns_t @ allocations)
+        vals_pre_cash_flow = np.where(active_mask, prev_vals * growth_factors, 0.0)
+        
+        # Calculate contributions (only if t <= withdrawal_start_year)
         if t <= withdrawal_start_year:
-            contrib = annual_contribution * ((1.0 + annual_contribution_growth) ** year_idx)
+            contrib = contribution_rate * vals_pre_cash_flow
         else:
             contrib = 0.0
             
-        # Withdrawal (at end of the year, adjusted for inflation)
+        # Calculate distributions (only if t > withdrawal_start_year)
         if t > withdrawal_start_year:
-            withdr = annual_withdrawal * inflation_multiplier
+            distrib = distribution_rate * vals_pre_cash_flow
         else:
-            withdr = 0.0
+            distrib = 0.0
             
-        prev_vals = portfolio_paths[:, t - 1]
-        vals_after_contrib = np.where(active_mask, prev_vals + contrib, 0.0)
-        
-        # Apply returns based on asset allocation
-        returns_t = sim_returns[:, year_idx, :]
-        growth_factors = 1.0 + (returns_t @ allocations)
-        
-        vals_after_growth = vals_after_contrib * growth_factors
-        
-        # Deduct withdrawals
-        final_vals_t = np.where(active_mask, vals_after_growth - withdr, 0.0)
+        # Update ending assets
+        final_vals_t = np.where(active_mask, vals_pre_cash_flow + contrib - distrib, 0.0)
         final_vals_t = np.maximum(final_vals_t, 0.0)
         
         # Update masks

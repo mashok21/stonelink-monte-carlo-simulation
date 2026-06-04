@@ -13,9 +13,9 @@ class SimulatePortfolioView(APIView):
             # Extract inputs with defaults
             initial_val = float(data.get('initial_portfolio_value', 100000))
             years = int(data.get('years', 30))
-            annual_contrib = float(data.get('annual_contribution', 5000))
-            contrib_growth = float(data.get('annual_contribution_growth', 3.0)) / 100.0
-            annual_withdr = float(data.get('annual_withdrawal', 12000))
+            # Extract contribution & distribution rates (Percentage of assets)
+            contribution_rate = float(data.get('contribution_rate', data.get('annual_contribution', 3.0))) / 100.0
+            distribution_rate = float(data.get('distribution_rate', data.get('annual_withdrawal', 4.0))) / 100.0
             withdr_start = int(data.get('withdrawal_start_year', 15))
             inflation = float(data.get('inflation_rate', 2.5)) / 100.0
             num_trials = int(data.get('num_trials', 1000))
@@ -37,7 +37,7 @@ class SimulatePortfolioView(APIView):
                 use_fixed_seed = use_fixed_seed.lower() == 'true'
             
             # Validate core values
-            if initial_val < 0 or years <= 0 or annual_contrib < 0 or annual_withdr < 0:
+            if initial_val < 0 or years <= 0 or contribution_rate < 0 or distribution_rate < 0:
                 return Response(
                     {"error": "Numeric values must be positive and years must be greater than zero."},
                     status=status.HTTP_400_BAD_REQUEST
@@ -69,9 +69,8 @@ class SimulatePortfolioView(APIView):
             results = run_portfolio_simulation(
                 initial_portfolio_value=initial_val,
                 years=years,
-                annual_contribution=annual_contrib,
-                annual_contribution_growth=contrib_growth,
-                annual_withdrawal=annual_withdr,
+                contribution_rate=contribution_rate,
+                distribution_rate=distribution_rate,
                 withdrawal_start_year=withdr_start,
                 inflation_rate=inflation,
                 allocations=allocations,

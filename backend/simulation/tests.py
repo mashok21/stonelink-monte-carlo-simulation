@@ -56,9 +56,8 @@ class PortfolioSimulationTestCase(TestCase):
         results = run_portfolio_simulation(
             initial_portfolio_value=100000,
             years=15,
-            annual_contribution=2000,
-            annual_contribution_growth=0.03,
-            annual_withdrawal=8000,
+            contribution_rate=0.03,
+            distribution_rate=0.04,
             withdrawal_start_year=5,
             inflation_rate=0.02,
             allocations=data['portfolio_weights']['Balanced'],
@@ -103,8 +102,8 @@ class PortfolioSimulationTestCase(TestCase):
             repair_results = run_portfolio_simulation(
                 initial_portfolio_value=10000,
                 years=5,
-                annual_contribution=0,
-                annual_withdrawal=0,
+                contribution_rate=0.0,
+                distribution_rate=0.0,
                 allocations=np.array([0.33, 0.33, 0.34]),
                 num_trials=50,
                 expected_returns=np.array([0.10, 0.08, 0.05]),
@@ -122,8 +121,8 @@ class PortfolioSimulationTestCase(TestCase):
             "years": 10,
             "num_trials": 200,
             "portfolio_type": "Balanced",
-            "annual_contribution": 10000,
-            "annual_withdrawal": 5000,
+            "contribution_rate": 3.0,
+            "distribution_rate": 4.0,
             "withdrawal_start_year": 5
         }
         
@@ -157,8 +156,8 @@ class PortfolioSimulationTestCase(TestCase):
             "num_trials": 200,
             "portfolio_type": "Balanced",
             "environment_mode": "MARKET_STRESS",
-            "annual_contribution": 10000,
-            "annual_withdrawal": 5000,
+            "contribution_rate": 3.0,
+            "distribution_rate": 4.0,
             "withdrawal_start_year": 5
         }
         
@@ -178,8 +177,8 @@ class PortfolioSimulationTestCase(TestCase):
             "years": 10,
             "num_trials": 200,
             "portfolio_type": "Balanced",
-            "annual_contribution": 10000,
-            "annual_withdrawal": 5000,
+            "contribution_rate": 3.0,
+            "distribution_rate": 4.0,
             "withdrawal_start_year": 5,
             "use_fixed_seed": True
         }
