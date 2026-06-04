@@ -16,7 +16,9 @@ def run_portfolio_simulation(
     environment_mode='STANDARD_CRUISE',
     asset_classes=None,
     unsmoothing_factor=1.4,
-    use_fixed_seed=True
+    use_fixed_seed=True,
+    success_mode='total_value',
+    target_mode='default'
 ):
     seed_value = 42 if use_fixed_seed else None
     rng = np.random.default_rng(seed_value)
@@ -106,6 +108,9 @@ def run_portfolio_simulation(
     portfolio_paths = np.zeros((num_trials, years + 1))
     portfolio_paths[:, 0] = initial_portfolio_value
     
+    cumulative_distributions_nominal = np.zeros((num_trials, years + 1))
+    cumulative_distributions_real = np.zeros((num_trials, years + 1))
+    
     active_mask = np.ones(num_trials, dtype=bool)
     failure_years = np.zeros(num_trials)
     
@@ -127,9 +132,12 @@ def run_portfolio_simulation(
             
         # Calculate distributions (only if t > withdrawal_start_year)
         if t > withdrawal_start_year:
-            distrib = distribution_rate * vals_pre_cash_flow
+            distrib = np.where(active_mask, distribution_rate * vals_pre_cash_flow, 0.0)
         else:
-            distrib = 0.0
+            distrib = np.zeros(num_trials)
+            
+        cumulative_distributions_nominal[:, t] = cumulative_distributions_nominal[:, t - 1] + distrib
+        cumulative_distributions_real[:, t] = cumulative_distributions_real[:, t - 1] + (distrib / ((1.0 + inflation_rate) ** t))
             
         # Update ending assets
         final_vals_t = np.where(active_mask, vals_pre_cash_flow + contrib - distrib, 0.0)
@@ -146,15 +154,53 @@ def run_portfolio_simulation(
     if target_hurdle is None:
         target_hurdle = initial_portfolio_value
 
-    # Compute Nominal Success rates
-    success_rates_nominal = np.mean(portfolio_paths >= target_hurdle, axis=0) * 100.0
-    
     # Calculate inflation-adjusted paths for real spending power
     inflation_factors = (1.0 + inflation_rate) ** np.arange(years + 1)
     real_portfolio_paths = portfolio_paths / inflation_factors
+
+    # Compute success rates over time
+    success_rates_nominal = np.zeros(years + 1)
+    success_rates_real = np.zeros(years + 1)
     
-    # Compute Real Success rates
-    success_rates_real = np.mean(real_portfolio_paths >= target_hurdle, axis=0) * 100.0
+    # Year 0 is 100% successful
+    success_rates_nominal[0] = 100.0
+    success_rates_real[0] = 100.0
+    
+    custom_target = target_hurdle
+    
+    for t in range(1, years + 1):
+        solvent_nom = portfolio_paths[:, t] > 0
+        solvent_real = real_portfolio_paths[:, t] > 0
+        
+        # Nominal target
+        if target_mode == 'custom':
+            target_nom = custom_target
+        else:
+            target_nom = initial_portfolio_value * ((1.0 + inflation_rate) ** t)
+            
+        # Real target
+        if target_mode == 'custom':
+            target_real = custom_target
+        else:
+            target_real = initial_portfolio_value
+            
+        # Nominal TVD
+        if success_mode == 'total_value':
+            tvd_nom = portfolio_paths[:, t] + cumulative_distributions_nominal[:, t]
+        else:
+            tvd_nom = portfolio_paths[:, t]
+            
+        # Real TVD
+        if success_mode == 'total_value':
+            tvd_real = real_portfolio_paths[:, t] + cumulative_distributions_real[:, t]
+        else:
+            tvd_real = real_portfolio_paths[:, t]
+            
+        success_nom_t = solvent_nom & (tvd_nom >= target_nom)
+        success_real_t = solvent_real & (tvd_real >= target_real)
+        
+        success_rates_nominal[t] = np.mean(success_nom_t) * 100.0
+        success_rates_real[t] = np.mean(success_real_t) * 100.0
     
     percentiles = [10, 25, 50, 75, 90]
     paths_percentiles = {}
@@ -185,6 +231,12 @@ def run_portfolio_simulation(
     else:
         avg_failure_year = None
         
+    tvd_nominal_paths = portfolio_paths + cumulative_distributions_nominal
+    tvd_real_paths = real_portfolio_paths + cumulative_distributions_real
+    
+    terminal_nominal_target = custom_target if target_mode == 'custom' else initial_portfolio_value * ((1.0 + inflation_rate) ** years)
+    terminal_real_target = custom_target if target_mode == 'custom' else initial_portfolio_value
+
     return {
         'years_list': list(range(years + 1)),
         'success_rates': success_rates_nominal.tolist(),
@@ -201,9 +253,17 @@ def run_portfolio_simulation(
         'summary': {
             'initial_value': initial_portfolio_value,
             'target_hurdle': target_hurdle,
+            'success_mode': success_mode,
+            'target_mode': target_mode,
             'median_terminal_nominal': float(paths_percentiles['p50'][-1]),
             'median_terminal_real': float(real_percentiles['p50'][-1]),
             'p10_terminal_nominal': float(paths_percentiles['p10'][-1]),
             'p90_terminal_nominal': float(paths_percentiles['p90'][-1]),
+            'median_distributions_nominal': float(np.percentile(cumulative_distributions_nominal[:, -1], 50)),
+            'median_distributions_real': float(np.percentile(cumulative_distributions_real[:, -1], 50)),
+            'median_tvd_nominal': float(np.percentile(tvd_nominal_paths[:, -1], 50)),
+            'median_tvd_real': float(np.percentile(tvd_real_paths[:, -1], 50)),
+            'target_value_nominal': float(terminal_nominal_target),
+            'target_value_real': float(terminal_real_target)
         }
     }

@@ -35,6 +35,9 @@ class SimulatePortfolioView(APIView):
             use_fixed_seed = data.get('use_fixed_seed', True)
             if isinstance(use_fixed_seed, str):
                 use_fixed_seed = use_fixed_seed.lower() == 'true'
+                
+            success_mode = data.get('success_mode', 'total_value')
+            target_mode = data.get('target_mode', 'default')
             
             # Validate core values
             if initial_val < 0 or years <= 0 or contribution_rate < 0 or distribution_rate < 0:
@@ -82,7 +85,9 @@ class SimulatePortfolioView(APIView):
                 environment_mode=environment_mode,
                 asset_classes=asset_classes,
                 unsmoothing_factor=unsmoothing_factor,
-                use_fixed_seed=use_fixed_seed
+                use_fixed_seed=use_fixed_seed,
+                success_mode=success_mode,
+                target_mode=target_mode
             )
             
             # Append portfolio info to results for frontend metadata display
