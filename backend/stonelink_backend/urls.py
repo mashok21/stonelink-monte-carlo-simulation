@@ -16,11 +16,13 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from simulation.views import SimulatePortfolioView
+from simulation.views import SimulatePortfolioView, HealthCheckView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('simulation.urls')),
     path('simulation/', SimulatePortfolioView.as_view(), name='simulation'),
+    path('health', HealthCheckView.as_view(), name='health'),
+    path('health/', HealthCheckView.as_view(), name='health-slash'),
 ]
 

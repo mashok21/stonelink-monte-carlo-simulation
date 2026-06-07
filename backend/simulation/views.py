@@ -4,6 +4,7 @@ from rest_framework import status
 import numpy as np
 from .engine import run_portfolio_simulation
 from .ingestion import parse_portfolio_excel
+from .audit import run_simulation_audit
 
 class SimulatePortfolioView(APIView):
     def post(self, request):
@@ -19,6 +20,11 @@ class SimulatePortfolioView(APIView):
             withdr_start = int(data.get('withdrawal_start_year', 15))
             inflation = float(data.get('inflation_rate', 2.5)) / 100.0
             num_trials = int(data.get('num_trials', 1000))
+            min_reserve_ratio = float(data.get('min_reserve_threshold_ratio', 20.0)) / 100.0
+            success_framework = data.get('success_framework', 'institutional_sustainability')
+            enable_hard_liquidation = data.get('enable_hard_liquidation', False)
+            if isinstance(enable_hard_liquidation, str):
+                enable_hard_liquidation = enable_hard_liquidation.lower() == 'true'
             
             # Portfolio mix type selection
             portfolio_type = data.get('portfolio_type', 'Balanced')
@@ -36,7 +42,10 @@ class SimulatePortfolioView(APIView):
             if isinstance(use_fixed_seed, str):
                 use_fixed_seed = use_fixed_seed.lower() == 'true'
                 
-            success_mode = data.get('success_mode', 'total_value')
+            if 'success_framework' in data:
+                success_mode = data.get('success_mode', None)
+            else:
+                success_mode = data.get('success_mode', 'total_value')
             target_mode = data.get('target_mode', 'default')
             
             # Validate core values
@@ -87,8 +96,37 @@ class SimulatePortfolioView(APIView):
                 unsmoothing_factor=unsmoothing_factor,
                 use_fixed_seed=use_fixed_seed,
                 success_mode=success_mode,
-                target_mode=target_mode
+                target_mode=target_mode,
+                min_reserve_threshold_ratio=min_reserve_ratio,
+                success_framework=success_framework,
+                enable_hard_liquidation=enable_hard_liquidation
             )
+            
+            # Perform mathematical self-audit of simulation results
+            params = {
+                'initial_portfolio_value': initial_val,
+                'years': years,
+                'contribution_rate': contribution_rate,
+                'distribution_rate': distribution_rate,
+                'withdrawal_start_year': withdr_start,
+                'inflation_rate': inflation,
+                'allocations': allocations,
+                'expected_returns': expected_returns,
+                'volatilities': volatilities,
+                'correlation_matrix': correlation_matrix,
+                'target_hurdle': target_hurdle,
+                'environment_mode': environment_mode,
+                'asset_classes': asset_classes,
+                'unsmoothing_factor': unsmoothing_factor,
+                'success_mode': success_mode,
+                'target_mode': target_mode,
+                'use_fixed_seed': use_fixed_seed,
+                'min_reserve_threshold_ratio': min_reserve_ratio,
+                'success_framework': success_framework,
+                'enable_hard_liquidation': enable_hard_liquidation
+            }
+            audit_report = run_simulation_audit(params, results)
+            results['audit_report'] = audit_report
             
             # Append portfolio info to results for frontend metadata display
             results['portfolio_type'] = portfolio_type
@@ -129,3 +167,7 @@ class SimulatePortfolioView(APIView):
                 {"error": f"An error occurred: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+class HealthCheckView(APIView):
+    def get(self, request):
+        return Response({"status": "ok"}, status=status.HTTP_200_OK)

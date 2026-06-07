@@ -17,9 +17,28 @@ def run_portfolio_simulation(
     asset_classes=None,
     unsmoothing_factor=1.4,
     use_fixed_seed=True,
-    success_mode='total_value',
-    target_mode='default'
+    target_mode='default',
+    min_reserve_threshold_ratio=0.20,
+    success_framework='institutional_sustainability',
+    enable_hard_liquidation=False,
+    # Old params for backward compatibility
+    success_mode=None,
+    solvency_policy=None
 ):
+    # Backward compatibility translation
+    if success_mode is not None or solvency_policy is not None:
+        if solvency_policy == 'absorbing_barrier':
+            enable_hard_liquidation = True
+            success_framework = 'institutional_sustainability'
+        elif solvency_policy == 'continuous_first_passage':
+            enable_hard_liquidation = False
+            success_framework = 'continuous_solvency'
+        else: # terminal_only
+            enable_hard_liquidation = False
+            if success_mode == 'terminal_assets':
+                success_framework = 'terminal_assets'
+            else:
+                success_framework = 'institutional_sustainability'
     seed_value = 42 if use_fixed_seed else None
     rng = np.random.default_rng(seed_value)
     
@@ -143,11 +162,17 @@ def run_portfolio_simulation(
         final_vals_t = np.where(active_mask, vals_pre_cash_flow + contrib - distrib, 0.0)
         final_vals_t = np.maximum(final_vals_t, 0.0)
         
-        # Update masks
-        newly_failed = active_mask & (final_vals_t == 0)
-        failure_years[newly_failed] = t
-        active_mask = active_mask & (final_vals_t > 0)
-        
+        # Update masks based on solvency policy (Layer 1 check)
+        min_reserve_val = min_reserve_threshold_ratio * initial_portfolio_value
+        if min_reserve_val <= 0 or not enable_hard_liquidation:
+            newly_failed = active_mask & (final_vals_t <= 0)
+            active_mask = active_mask & (final_vals_t > 0)
+        else: # Hard Liquidation enabled
+            newly_failed = active_mask & (final_vals_t < min_reserve_val)
+            active_mask = active_mask & (final_vals_t >= min_reserve_val)
+            
+        # Zero out values for failed paths to avoid further growth or distributions
+        final_vals_t = np.where(active_mask, final_vals_t, 0.0)
         portfolio_paths[:, t] = final_vals_t
 
     # --- AGGREGATION & STATISTICS ---
@@ -168,10 +193,39 @@ def run_portfolio_simulation(
     
     custom_target = target_hurdle
     
-    for t in range(1, years + 1):
-        solvent_nom = portfolio_paths[:, t] > 0
-        solvent_real = real_portfolio_paths[:, t] > 0
+    min_reserve_val = min_reserve_threshold_ratio * initial_portfolio_value
+    
+    # Calculate running minimums for continuous solvency checks (Layer 2)
+    if success_framework == 'continuous_solvency' and min_reserve_val > 0:
+        running_min_nom = np.minimum.accumulate(portfolio_paths[:, 1:], axis=1)
+        running_min_real = np.minimum.accumulate(real_portfolio_paths[:, 1:], axis=1)
         
+    for t in range(1, years + 1):
+        year_idx = t - 1
+        
+        # 1. Define solvency (Layer 2)
+        if min_reserve_val <= 0:
+            solvent_nom = portfolio_paths[:, t] > 0
+            solvent_real = real_portfolio_paths[:, t] > 0
+        elif success_framework == 'terminal_assets' or success_framework == 'total_value':
+            solvent_nom = portfolio_paths[:, t] > 0
+            solvent_real = real_portfolio_paths[:, t] > 0
+        elif success_framework == 'continuous_solvency':
+            solvent_nom = running_min_nom[:, year_idx] >= min_reserve_val
+            solvent_real = running_min_real[:, year_idx] >= min_reserve_val
+        else: # institutional_sustainability
+            solvent_nom = portfolio_paths[:, t] >= min_reserve_val
+            solvent_real = real_portfolio_paths[:, t] >= min_reserve_val
+            
+        # 2. Define TVD (Layer 2 / 3)
+        if success_framework == 'terminal_assets':
+            tvd_nom = portfolio_paths[:, t]
+            tvd_real = real_portfolio_paths[:, t]
+        else:
+            tvd_nom = portfolio_paths[:, t] + cumulative_distributions_nominal[:, t]
+            tvd_real = real_portfolio_paths[:, t] + cumulative_distributions_real[:, t]
+            
+        # 3. Define target hurdle (Layer 3)
         # Nominal target
         if target_mode == 'custom':
             target_nom = custom_target
@@ -183,18 +237,6 @@ def run_portfolio_simulation(
             target_real = custom_target
         else:
             target_real = initial_portfolio_value
-            
-        # Nominal TVD
-        if success_mode == 'total_value':
-            tvd_nom = portfolio_paths[:, t] + cumulative_distributions_nominal[:, t]
-        else:
-            tvd_nom = portfolio_paths[:, t]
-            
-        # Real TVD
-        if success_mode == 'total_value':
-            tvd_real = real_portfolio_paths[:, t] + cumulative_distributions_real[:, t]
-        else:
-            tvd_real = real_portfolio_paths[:, t]
             
         success_nom_t = solvent_nom & (tvd_nom >= target_nom)
         success_real_t = solvent_real & (tvd_real >= target_real)
@@ -234,6 +276,33 @@ def run_portfolio_simulation(
     tvd_nominal_paths = portfolio_paths + cumulative_distributions_nominal
     tvd_real_paths = real_portfolio_paths + cumulative_distributions_real
     
+    # Layer 2 Diagnostics
+    # 1. Probability of Reserve Breach
+    # 2. Median First Breach Year
+    # 3. Median Minimum Asset Value
+    # 4. Percentage of paths below threshold (at terminal year)
+    
+    if min_reserve_val > 0.0:
+        breached_matrix = portfolio_paths[:, 1:] < min_reserve_val
+        below_threshold_terminal = portfolio_paths[:, -1] < min_reserve_val
+    else:
+        breached_matrix = portfolio_paths[:, 1:] <= 0.0
+        below_threshold_terminal = portfolio_paths[:, -1] <= 0.0
+        
+    any_breached = np.any(breached_matrix, axis=1)
+    prob_reserve_breach = float(np.mean(any_breached) * 100.0)
+    pct_paths_below_threshold = float(np.mean(below_threshold_terminal) * 100.0)
+    
+    first_breach_years = np.argmax(breached_matrix, axis=1) + 1
+    first_breach_years_breached = first_breach_years[any_breached]
+    if len(first_breach_years_breached) > 0:
+        median_first_breach_year = float(np.median(first_breach_years_breached))
+    else:
+        median_first_breach_year = None
+        
+    min_assets_per_path = np.min(portfolio_paths, axis=1)
+    median_minimum_assets = float(np.median(min_assets_per_path))
+    
     terminal_nominal_target = custom_target if target_mode == 'custom' else initial_portfolio_value * ((1.0 + inflation_rate) ** years)
     terminal_real_target = custom_target if target_mode == 'custom' else initial_portfolio_value
 
@@ -250,11 +319,18 @@ def run_portfolio_simulation(
         'nominal_paths': {k: v.tolist() for k, v in paths_percentiles.items()},
         'real_paths': {k: v.tolist() for k, v in real_percentiles.items()},
         'histogram': hist_data,
+        'prob_reserve_breach': prob_reserve_breach,
+        'median_first_breach_year': median_first_breach_year,
+        'median_minimum_assets': median_minimum_assets,
+        'pct_paths_below_threshold': pct_paths_below_threshold,
         'summary': {
             'initial_value': initial_portfolio_value,
             'target_hurdle': target_hurdle,
             'success_mode': success_mode,
             'target_mode': target_mode,
+            'min_reserve_threshold_ratio': min_reserve_threshold_ratio,
+            'success_framework': success_framework,
+            'enable_hard_liquidation': enable_hard_liquidation,
             'median_terminal_nominal': float(paths_percentiles['p50'][-1]),
             'median_terminal_real': float(real_percentiles['p50'][-1]),
             'p10_terminal_nominal': float(paths_percentiles['p10'][-1]),
@@ -264,6 +340,10 @@ def run_portfolio_simulation(
             'median_tvd_nominal': float(np.percentile(tvd_nominal_paths[:, -1], 50)),
             'median_tvd_real': float(np.percentile(tvd_real_paths[:, -1], 50)),
             'target_value_nominal': float(terminal_nominal_target),
-            'target_value_real': float(terminal_real_target)
+            'target_value_real': float(terminal_real_target),
+            'prob_reserve_breach': prob_reserve_breach,
+            'median_first_breach_year': median_first_breach_year,
+            'median_minimum_assets': median_minimum_assets,
+            'pct_paths_below_threshold': pct_paths_below_threshold
         }
     }
