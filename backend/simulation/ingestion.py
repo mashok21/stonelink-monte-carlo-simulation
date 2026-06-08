@@ -1,9 +1,12 @@
 import os
+import threading
 import pandas as pd
 import numpy as np
 from django.conf import settings
 
 EXCEL_PATH = os.path.join(settings.BASE_DIR, 'simulation', 'portfolio_data.xlsx')
+_CACHE_LOCK = threading.Lock()
+_CACHE = {"path": None, "mtime": None, "data": None}
 
 def get_excel_path():
     return EXCEL_PATH
@@ -86,12 +89,41 @@ def generate_default_excel(filepath):
         df_weights.to_excel(writer, sheet_name='Portfolio Weights', index=False)
         df_settings.to_excel(writer, sheet_name='Simulation Settings', index=False)
 
+def _clone_excel_data(data):
+    return {
+        'asset_names': list(data['asset_names']),
+        'expected_returns': data['expected_returns'].copy(),
+        'volatilities': data['volatilities'].copy(),
+        'correlation_matrix': data['correlation_matrix'].copy(),
+        'portfolio_weights': {k: v.copy() for k, v in data['portfolio_weights'].items()},
+        'asset_classes': list(data['asset_classes']),
+        'unsmoothing_factor': data['unsmoothing_factor']
+    }
+
+
 def parse_portfolio_excel():
     filepath = get_excel_path()
-    
+
     if not os.path.exists(filepath):
         generate_default_excel(filepath)
-        
+
+    mtime = os.path.getmtime(filepath)
+    with _CACHE_LOCK:
+        if _CACHE["path"] == filepath and _CACHE["mtime"] == mtime and _CACHE["data"] is not None:
+            return _clone_excel_data(_CACHE["data"])
+
+    data = _parse_portfolio_excel_uncached(filepath)
+    with _CACHE_LOCK:
+        _CACHE.update({"path": filepath, "mtime": mtime, "data": _clone_excel_data(data)})
+    return data
+
+
+def clear_portfolio_excel_cache():
+    with _CACHE_LOCK:
+        _CACHE.update({"path": None, "mtime": None, "data": None})
+
+
+def _parse_portfolio_excel_uncached(filepath):
     try:
         # Load sheets with context manager to prevent file locks
         with pd.ExcelFile(filepath) as xls:

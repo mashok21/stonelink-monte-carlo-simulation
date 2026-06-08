@@ -1,13 +1,17 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from django.conf import settings
 import numpy as np
 import subprocess
 import os
-import datetime
+import logging
 from .engine import run_portfolio_simulation
 from .ingestion import parse_portfolio_excel
 from .audit import run_simulation_audit
+from .serializers import SimulationRequestSerializer
+
+logger = logging.getLogger(__name__)
 
 # Cache git commit info at server startup for high performance
 _BACKEND_VERSION = "unknown"
@@ -32,56 +36,30 @@ except Exception:
     _BUILD_DATE = "unknown"
 
 class SimulatePortfolioView(APIView):
+    throttle_scope = "simulation"
+
     def post(self, request):
+        serializer = SimulationRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
         try:
-            data = request.data
-            
-            # Extract inputs with defaults
-            initial_val = float(data.get('initial_portfolio_value', 100000))
-            years = int(data.get('years', 30))
-            # Extract contribution & distribution rates (Percentage of assets)
-            contribution_rate = float(data.get('contribution_rate', data.get('annual_contribution', 3.0))) / 100.0
-            distribution_rate = float(data.get('distribution_rate', data.get('annual_withdrawal', 4.0))) / 100.0
-            withdr_start = int(data.get('withdrawal_start_year', 15))
-            inflation = float(data.get('inflation_rate', 2.5)) / 100.0
-            num_trials = int(data.get('num_trials', 1000))
-            min_reserve_ratio = float(data.get('min_reserve_threshold_ratio', 20.0)) / 100.0
-            success_framework = data.get('success_framework', 'institutional_sustainability')
-            enable_hard_liquidation = data.get('enable_hard_liquidation', False)
-            if isinstance(enable_hard_liquidation, str):
-                enable_hard_liquidation = enable_hard_liquidation.lower() == 'true'
-            
-            # Portfolio mix type selection
-            portfolio_type = data.get('portfolio_type', 'Balanced')
-            target_hurdle = data.get('target_hurdle')
-            if target_hurdle is not None:
-                target_hurdle = float(target_hurdle)
-            else:
-                target_hurdle = initial_val
-                
-            # Simulation environment mode (STANDARD_CRUISE or MARKET_STRESS)
-            environment_mode = data.get('environment_mode', 'STANDARD_CRUISE')
-            
-            # Simulation seed control (standardized baseline or live variance)
-            use_fixed_seed = data.get('use_fixed_seed', True)
-            if isinstance(use_fixed_seed, str):
-                use_fixed_seed = use_fixed_seed.lower() == 'true'
-                
-            if 'success_framework' in data:
-                success_mode = data.get('success_mode', None)
-            else:
-                success_mode = data.get('success_mode', 'total_value')
-            target_mode = data.get('target_mode', 'default')
-            
-            # Validate core values
-            if initial_val < 0 or years <= 0 or contribution_rate < 0 or distribution_rate < 0:
-                return Response(
-                    {"error": "Numeric values must be positive and years must be greater than zero."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-                
-            if num_trials < 10 or num_trials > 10000:
-                num_trials = 1000
+            initial_val = data['initial_portfolio_value']
+            years = data['years']
+            contribution_rate = data['contribution_rate'] / 100.0
+            distribution_rate = data['distribution_rate'] / 100.0
+            withdr_start = data['withdrawal_start_year']
+            inflation = data['inflation_rate'] / 100.0
+            num_trials = data['num_trials']
+            min_reserve_ratio = data['min_reserve_threshold_ratio'] / 100.0
+            success_framework = data['success_framework']
+            enable_hard_liquidation = data['enable_hard_liquidation']
+            portfolio_type = data['portfolio_type']
+            target_hurdle = data['target_hurdle']
+            environment_mode = data['environment_mode']
+            use_fixed_seed = data['use_fixed_seed']
+            success_mode = data.get('success_mode')
+            target_mode = data['target_mode']
                 
             # Load dynamic parameters from Excel ingestion pipeline
             excel_data = parse_portfolio_excel()
@@ -150,7 +128,15 @@ class SimulatePortfolioView(APIView):
                 'success_framework': success_framework,
                 'enable_hard_liquidation': enable_hard_liquidation
             }
-            audit_report = run_simulation_audit(params, results)
+            if data['include_audit'] or settings.SIMULATION_RUN_AUDIT_INLINE:
+                audit_report = run_simulation_audit(params, results)
+            else:
+                audit_report = {
+                    'status': 'NOT_RUN',
+                    'warnings': [],
+                    'test_results': {},
+                    'message': 'Inline audit is disabled for normal API requests.'
+                }
             results['audit_report'] = audit_report
             
             # Append portfolio info to results for frontend metadata display
@@ -180,16 +166,10 @@ class SimulatePortfolioView(APIView):
             
             return Response(results, status=status.HTTP_200_OK)
             
-        except ValueError as ve:
-            return Response(
-                {"error": f"Invalid parameter type: {str(ve)}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            logger.exception("Simulation request failed")
             return Response(
-                {"error": f"An error occurred: {str(e)}"},
+                {"error": "Simulation request failed."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

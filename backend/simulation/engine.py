@@ -87,7 +87,11 @@ def run_portfolio_simulation(
 
     # Compute Cholesky decomposition factor L (where L @ L.T = Correlation Matrix)
     # This factor is used to inject correlation into independent random draws.
-    L = np.linalg.cholesky(correlation_matrix)
+    try:
+        L = np.linalg.cholesky(correlation_matrix)
+    except np.linalg.LinAlgError:
+        jitter = np.eye(correlation_matrix.shape[0]) * 1e-8
+        L = np.linalg.cholesky(correlation_matrix + jitter)
     
     # Generate joint returns based on simulation environment mode
     # Draw independent standard normal random variables
@@ -170,6 +174,8 @@ def run_portfolio_simulation(
         else: # Hard Liquidation enabled
             newly_failed = active_mask & (final_vals_t < min_reserve_val)
             active_mask = active_mask & (final_vals_t >= min_reserve_val)
+
+        failure_years[newly_failed] = t
             
         # Zero out values for failed paths to avoid further growth or distributions
         final_vals_t = np.where(active_mask, final_vals_t, 0.0)

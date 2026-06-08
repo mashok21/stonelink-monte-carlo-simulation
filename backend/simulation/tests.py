@@ -1,13 +1,17 @@
+from django.core.cache import cache
 from django.test import TestCase, Client
 from django.urls import reverse
 import numpy as np
 import os
+from unittest.mock import patch
 
-from .ingestion import parse_portfolio_excel, get_excel_path
+from . import ingestion
+from .ingestion import parse_portfolio_excel, get_excel_path, clear_portfolio_excel_cache
 from .engine import run_portfolio_simulation
 
 class PortfolioSimulationTestCase(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = Client()
         self.url = reverse('simulate')
         
@@ -132,6 +136,7 @@ class PortfolioSimulationTestCase(TestCase):
         res_data = response.json()
         self.assertEqual(res_data['portfolio_type'], 'Balanced')
         self.assertIn('assets', res_data)
+        self.assertEqual(res_data['audit_report']['status'], 'NOT_RUN')
         
         # Check that assets list is returned and has content
         self.assertTrue(len(res_data['assets']) > 0)
@@ -147,6 +152,82 @@ class PortfolioSimulationTestCase(TestCase):
         invalid_payload['initial_portfolio_value'] = -100
         bad_response = self.client.post(self.url, data=invalid_payload, content_type='application/json')
         self.assertEqual(bad_response.status_code, 400)
+        self.assertIn('initial_portfolio_value', bad_response.json())
+
+    def test_api_contract_root_and_versioned_endpoints_match(self):
+        """Both supported API routes should expose the same response contract during migration."""
+        payload = {
+            "initial_portfolio_value": 150000,
+            "years": 5,
+            "num_trials": 50,
+            "portfolio_type": "Balanced",
+            "contribution_rate": 3.0,
+            "distribution_rate": 4.0,
+            "withdrawal_start_year": 2
+        }
+        root_response = self.client.post(reverse('simulation'), data=payload, content_type='application/json')
+        api_response = self.client.post(self.url, data=payload, content_type='application/json')
+        self.assertEqual(root_response.status_code, 200)
+        self.assertEqual(api_response.status_code, 200)
+
+        for key in [
+            'years_list',
+            'success_rates_nominal',
+            'success_rates_real',
+            'summary',
+            'assets',
+            'all_assets',
+            'correlation_matrix',
+            'audit_report',
+            'portfolio_type',
+        ]:
+            self.assertIn(key, root_response.json())
+            self.assertIn(key, api_response.json())
+
+    def test_api_validation_rejects_unbounded_or_inconsistent_inputs(self):
+        payload = {
+            "initial_portfolio_value": 100000,
+            "years": 101,
+            "num_trials": 10001,
+            "portfolio_type": "Balanced",
+            "environment_mode": "BAD_MODE",
+            "withdrawal_start_year": 102
+        }
+        response = self.client.post(self.url, data=payload, content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertIn('years', body)
+        self.assertIn('num_trials', body)
+        self.assertIn('environment_mode', body)
+
+        custom_target_missing = {
+            "initial_portfolio_value": 100000,
+            "years": 10,
+            "num_trials": 50,
+            "target_mode": "custom",
+            "withdrawal_start_year": 5
+        }
+        response = self.client.post(self.url, data=custom_target_missing, content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('target_hurdle', response.json())
+
+    def test_simulation_endpoint_is_rate_limited(self):
+        cache.clear()
+        payload = {
+            "initial_portfolio_value": 150000,
+            "years": 1,
+            "num_trials": 10,
+            "portfolio_type": "Balanced",
+            "contribution_rate": 3.0,
+            "distribution_rate": 4.0,
+            "withdrawal_start_year": 1
+        }
+        statuses = [
+            self.client.post(self.url, data=payload, content_type='application/json').status_code
+            for _ in range(21)
+        ]
+        self.assertEqual(statuses[:20], [200] * 20)
+        self.assertEqual(statuses[20], 429)
 
     def test_market_stress_mode(self):
         """Test POST request with environment_mode: MARKET_STRESS and verify that calculations branch into Multivariate Student-t distribution without crashing."""
@@ -216,6 +297,61 @@ class PortfolioSimulationTestCase(TestCase):
             res_data1['summary']['median_terminal_nominal'],
             res_data3['summary']['median_terminal_nominal']
         )
+
+    def test_numerical_regression_for_deterministic_two_asset_case(self):
+        """Golden values protect the core Monte Carlo math from accidental drift."""
+        results = run_portfolio_simulation(
+            initial_portfolio_value=100000,
+            years=3,
+            contribution_rate=0.02,
+            distribution_rate=0.03,
+            withdrawal_start_year=1,
+            inflation_rate=0.02,
+            allocations=np.array([0.6, 0.4]),
+            num_trials=100,
+            expected_returns=np.array([0.07, 0.03]),
+            volatilities=np.array([0.12, 0.04]),
+            correlation_matrix=np.array([[1.0, 0.2], [0.2, 1.0]]),
+            use_fixed_seed=True,
+            success_framework='institutional_sustainability',
+            min_reserve_threshold_ratio=0.2,
+        )
+
+        self.assertAlmostEqual(results['summary']['median_terminal_nominal'], 111408.53944820625, places=6)
+        self.assertAlmostEqual(results['summary']['median_tvd_nominal'], 118310.16488327438, places=6)
+        self.assertEqual(results['success_rate_terminal_nominal'], 83.0)
+        self.assertEqual(results['summary']['prob_reserve_breach'], 0.0)
+
+    def test_average_failure_year_is_recorded(self):
+        results = run_portfolio_simulation(
+            initial_portfolio_value=100000,
+            years=5,
+            contribution_rate=0.0,
+            distribution_rate=1.0,
+            withdrawal_start_year=0,
+            inflation_rate=0.0,
+            allocations=np.array([1.0]),
+            num_trials=20,
+            expected_returns=np.array([0.0]),
+            volatilities=np.array([0.0]),
+            correlation_matrix=np.array([[1.0]]),
+            use_fixed_seed=True,
+            enable_hard_liquidation=True,
+            min_reserve_threshold_ratio=0.2,
+        )
+
+        self.assertEqual(results['avg_failure_year'], 1.0)
+        self.assertEqual(results['success_rate_terminal_nominal'], 0.0)
+
+    def test_excel_ingestion_cache_reuses_parse_until_file_changes(self):
+        clear_portfolio_excel_cache()
+        with patch.object(ingestion, '_parse_portfolio_excel_uncached', wraps=ingestion._parse_portfolio_excel_uncached) as parse_mock:
+            first = parse_portfolio_excel()
+            second = parse_portfolio_excel()
+
+        self.assertEqual(parse_mock.call_count, 1)
+        self.assertEqual(first['asset_names'], second['asset_names'])
+        self.assertIsNot(first['expected_returns'], second['expected_returns'])
 
     def test_health_check_endpoint(self):
         """Test that the health check endpoint returns git commit info and schema version."""
