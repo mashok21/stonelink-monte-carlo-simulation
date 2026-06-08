@@ -1,0 +1,6 @@
+*.log
+backend/simulation_audit.log
+backend/db.sqlite3
+backend/__pycache__
+backend/**/__pycache__
+stonelink_documentation.pdf

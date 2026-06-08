@@ -42,7 +42,7 @@ if not SECRET_KEY:
 
 ALLOWED_HOSTS = env_csv(
     "DJANGO_ALLOWED_HOSTS",
-    "ashok21aug.pythonanywhere.com,localhost,127.0.0.1",
+    ".vercel.app,ashok21aug.pythonanywhere.com,localhost,127.0.0.1",
 )
 
 
@@ -74,6 +74,11 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = env_csv(
     "DJANGO_CORS_ALLOWED_ORIGINS",
     "https://stonelink-monte-carlo-simulation-fr.vercel.app,http://localhost:3000,http://localhost:5173,http://127.0.0.1:5173",
+)
+
+CORS_ALLOWED_ORIGIN_REGEXES = env_csv(
+    "DJANGO_CORS_ALLOWED_ORIGIN_REGEXES",
+    r"^https://.*\.vercel\.app$",
 )
 
 CSRF_TRUSTED_ORIGINS = env_csv("DJANGO_CSRF_TRUSTED_ORIGINS", "")
@@ -120,7 +125,10 @@ WSGI_APPLICATION = 'stonelink_backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': os.environ.get(
+            "DJANGO_SQLITE_PATH",
+            "/tmp/db.sqlite3" if os.environ.get("VERCEL") else str(BASE_DIR / "db.sqlite3"),
+        ),
     }
 }
 

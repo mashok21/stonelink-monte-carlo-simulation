@@ -257,9 +257,8 @@ def run_simulation_audit(params, results):
     # SECTION 6: FILE LOGGING PERSISTENCE
     # ----------------------------------------------------
     try:
-        log_dir = os.path.dirname(os.path.abspath(__file__))
-        base_dir = os.path.dirname(log_dir)
-        log_path = os.path.join(base_dir, 'simulation_audit.log')
+        default_log_path = os.path.join('/tmp' if os.environ.get('VERCEL') else os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'simulation_audit.log')
+        log_path = os.environ.get('SIMULATION_AUDIT_LOG_PATH', default_log_path)
         
         with open(log_path, 'a', encoding='utf-8') as f:
             log_entry = {

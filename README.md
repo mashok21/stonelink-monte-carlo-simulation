@@ -23,6 +23,22 @@ Copy `backend/.env.example` into your deployment environment and set the values 
 
 Inline audit simulations are disabled by default with `SIMULATION_RUN_AUDIT_INLINE=false`. Send `include_audit=true` only when an expensive synchronous audit is explicitly needed.
 
+## Vercel Deployment
+
+This repository includes `vercel.json`, `api/index.py`, and a root `requirements.txt` shim so Vercel can deploy Django through the Python runtime.
+
+Required Vercel environment variables:
+
+- `DJANGO_DEBUG=false`
+- `DJANGO_SECRET_KEY`
+- `DJANGO_ALLOWED_HOSTS=.vercel.app,<your-backend-domain>`
+- `DJANGO_CORS_ALLOWED_ORIGINS=https://<your-frontend-domain>`
+- `DJANGO_CORS_ALLOWED_ORIGIN_REGEXES=^https://.*\.vercel\.app$` if preview deployments should call the API
+- `DJANGO_SQLITE_PATH=/tmp/db.sqlite3`
+- `SIMULATION_AUDIT_LOG_PATH=/tmp/simulation_audit.log`
+
+Keep `SIMULATION_RUN_AUDIT_INLINE=false` on Vercel unless you intentionally want slower synchronous function invocations.
+
 ## Local Development
 
 ```powershell
