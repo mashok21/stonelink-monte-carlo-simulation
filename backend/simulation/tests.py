@@ -217,4 +217,15 @@ class PortfolioSimulationTestCase(TestCase):
             res_data3['summary']['median_terminal_nominal']
         )
 
+    def test_health_check_endpoint(self):
+        """Test that the health check endpoint returns git commit info and schema version."""
+        url = reverse('health')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('backend_version', data)
+        self.assertIn('build_date', data)
+        self.assertIn('schema_version', data)
+        self.assertEqual(data['schema_version'], '3')
+
 

@@ -2,9 +2,34 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 import numpy as np
+import subprocess
+import os
+import datetime
 from .engine import run_portfolio_simulation
 from .ingestion import parse_portfolio_excel
 from .audit import run_simulation_audit
+
+# Cache git commit info at server startup for high performance
+_BACKEND_VERSION = "unknown"
+_BUILD_DATE = "unknown"
+_SCHEMA_VERSION = "3"
+
+try:
+    _repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _BACKEND_VERSION = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], 
+        cwd=_repo_dir, 
+        stderr=subprocess.DEVNULL
+    ).decode("utf-8").strip()
+    
+    _BUILD_DATE = subprocess.check_output(
+        ["git", "log", "-1", "--format=%cI"], 
+        cwd=_repo_dir, 
+        stderr=subprocess.DEVNULL
+    ).decode("utf-8").strip()
+except Exception:
+    _BACKEND_VERSION = "unknown"
+    _BUILD_DATE = "unknown"
 
 class SimulatePortfolioView(APIView):
     def post(self, request):
@@ -170,4 +195,8 @@ class SimulatePortfolioView(APIView):
 
 class HealthCheckView(APIView):
     def get(self, request):
-        return Response({"status": "ok"}, status=status.HTTP_200_OK)
+        return Response({
+            "backend_version": _BACKEND_VERSION,
+            "build_date": _BUILD_DATE,
+            "schema_version": _SCHEMA_VERSION
+        }, status=status.HTTP_200_OK)
