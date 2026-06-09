@@ -6,8 +6,10 @@ import os
 from unittest.mock import patch
 
 from . import ingestion
+from .benchmarks import TWO_ASSET_GOLDEN_CASE
 from .ingestion import parse_portfolio_excel, get_excel_path, clear_portfolio_excel_cache
 from .engine import run_portfolio_simulation
+from .model_metadata import MODEL_VERSION
 
 class PortfolioSimulationTestCase(TestCase):
     def setUp(self):
@@ -137,6 +139,12 @@ class PortfolioSimulationTestCase(TestCase):
         self.assertEqual(res_data['portfolio_type'], 'Balanced')
         self.assertIn('assets', res_data)
         self.assertEqual(res_data['audit_report']['status'], 'NOT_RUN')
+        self.assertEqual(res_data['model_version'], MODEL_VERSION)
+        self.assertEqual(res_data['metadata']['model_version'], MODEL_VERSION)
+        self.assertIn('disclaimer', res_data['metadata'])
+        self.assertIn('runtime_ms', res_data['metadata'])
+        self.assertIn('simulation', res_data['metadata']['runtime_ms'])
+        self.assertIn('X-Request-ID', response.headers)
         
         # Check that assets list is returned and has content
         self.assertTrue(len(res_data['assets']) > 0)
@@ -180,6 +188,8 @@ class PortfolioSimulationTestCase(TestCase):
             'correlation_matrix',
             'audit_report',
             'portfolio_type',
+            'model_version',
+            'metadata',
         ]:
             self.assertIn(key, root_response.json())
             self.assertIn(key, api_response.json())
@@ -300,27 +310,13 @@ class PortfolioSimulationTestCase(TestCase):
 
     def test_numerical_regression_for_deterministic_two_asset_case(self):
         """Golden values protect the core Monte Carlo math from accidental drift."""
-        results = run_portfolio_simulation(
-            initial_portfolio_value=100000,
-            years=3,
-            contribution_rate=0.02,
-            distribution_rate=0.03,
-            withdrawal_start_year=1,
-            inflation_rate=0.02,
-            allocations=np.array([0.6, 0.4]),
-            num_trials=100,
-            expected_returns=np.array([0.07, 0.03]),
-            volatilities=np.array([0.12, 0.04]),
-            correlation_matrix=np.array([[1.0, 0.2], [0.2, 1.0]]),
-            use_fixed_seed=True,
-            success_framework='institutional_sustainability',
-            min_reserve_threshold_ratio=0.2,
-        )
+        results = run_portfolio_simulation(**TWO_ASSET_GOLDEN_CASE['params'])
+        expected = TWO_ASSET_GOLDEN_CASE['expected']
 
-        self.assertAlmostEqual(results['summary']['median_terminal_nominal'], 111408.53944820625, places=6)
-        self.assertAlmostEqual(results['summary']['median_tvd_nominal'], 118310.16488327438, places=6)
-        self.assertEqual(results['success_rate_terminal_nominal'], 83.0)
-        self.assertEqual(results['summary']['prob_reserve_breach'], 0.0)
+        self.assertAlmostEqual(results['summary']['median_terminal_nominal'], expected['median_terminal_nominal'], places=6)
+        self.assertAlmostEqual(results['summary']['median_tvd_nominal'], expected['median_tvd_nominal'], places=6)
+        self.assertEqual(results['success_rate_terminal_nominal'], expected['success_rate_terminal_nominal'])
+        self.assertEqual(results['summary']['prob_reserve_breach'], expected['prob_reserve_breach'])
 
     def test_average_failure_year_is_recorded(self):
         results = run_portfolio_simulation(
@@ -363,5 +359,8 @@ class PortfolioSimulationTestCase(TestCase):
         self.assertIn('build_date', data)
         self.assertIn('schema_version', data)
         self.assertEqual(data['schema_version'], '3')
+        self.assertEqual(data['model_version'], MODEL_VERSION)
+        self.assertTrue(data['observability']['request_ids'])
+        self.assertTrue(data['observability']['structured_logging'])
 
 

@@ -10,7 +10,19 @@ Django REST API for portfolio Monte Carlo simulation.
 - `backend/simulation/engine.py`: Monte Carlo engine and numerical aggregation.
 - `backend/simulation/ingestion.py`: Excel ingestion with file-mtime caching.
 - `backend/simulation/audit.py`: optional expensive self-audit routines.
+- `backend/simulation/model_metadata.py`: model version, disclaimer, and limitation metadata.
+- `backend/simulation/logging_utils.py`: request ID middleware and JSON logging.
+- `backend/simulation/benchmarks.py`: benchmark portfolio and golden regression fixtures.
 - `backend/simulation/tests.py`: API, validation, throttling, cache, and numerical regression tests.
+
+## Governance Documents
+
+- `MODEL_METHODOLOGY.md`
+- `VALIDATION_FRAMEWORK.md`
+- `PRODUCTION_DEPLOYMENT_CHECKLIST.md`
+- `ARCHITECTURE.md`
+- `OPERATIONAL_RUNBOOK.md`
+- `SCALABILITY_ASSESSMENT.md`
 
 ## Configuration
 
@@ -36,6 +48,9 @@ Required Vercel environment variables:
 - `DJANGO_CORS_ALLOWED_ORIGIN_REGEXES=^https://.*\.vercel\.app$` if preview deployments should call the API
 - `DJANGO_SQLITE_PATH=/tmp/db.sqlite3`
 - `SIMULATION_AUDIT_LOG_PATH=/tmp/simulation_audit.log`
+- `ERROR_TRACKING_DSN=<optional-error-tracking-dsn>`
+- `OBSERVABILITY_ENABLED=true`
+- `DJANGO_LOG_LEVEL=INFO`
 
 Keep `SIMULATION_RUN_AUDIT_INLINE=false` on Vercel unless you intentionally want slower synchronous function invocations.
 

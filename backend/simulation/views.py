@@ -6,17 +6,19 @@ import numpy as np
 import subprocess
 import os
 import logging
+import time
 from .engine import run_portfolio_simulation
 from .ingestion import parse_portfolio_excel
 from .audit import run_simulation_audit
 from .serializers import SimulationRequestSerializer
+from .model_metadata import MODEL_DISCLAIMER, MODEL_LIMITATIONS, MODEL_NAME, MODEL_VERSION, SCHEMA_VERSION
 
 logger = logging.getLogger(__name__)
 
 # Cache git commit info at server startup for high performance
 _BACKEND_VERSION = "unknown"
 _BUILD_DATE = "unknown"
-_SCHEMA_VERSION = "3"
+_SCHEMA_VERSION = SCHEMA_VERSION
 
 try:
     _repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -39,6 +41,8 @@ class SimulatePortfolioView(APIView):
     throttle_scope = "simulation"
 
     def post(self, request):
+        request_id = getattr(request, "request_id", "unknown")
+        request_started = time.perf_counter()
         serializer = SimulationRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -81,6 +85,7 @@ class SimulatePortfolioView(APIView):
                 allocations = portfolio_weights.get('Balanced', np.ones(len(expected_returns)) / len(expected_returns))
                 
             # Run simulation
+            simulation_started = time.perf_counter()
             results = run_portfolio_simulation(
                 initial_portfolio_value=initial_val,
                 years=years,
@@ -104,6 +109,7 @@ class SimulatePortfolioView(APIView):
                 success_framework=success_framework,
                 enable_hard_liquidation=enable_hard_liquidation
             )
+            simulation_runtime_ms = round((time.perf_counter() - simulation_started) * 1000, 2)
             
             # Perform mathematical self-audit of simulation results
             params = {
@@ -163,13 +169,52 @@ class SimulatePortfolioView(APIView):
                 }
                 for name, weight, ret, vol in zip(asset_names, allocations, expected_returns, volatilities)
             ]
+            total_runtime_ms = round((time.perf_counter() - request_started) * 1000, 2)
+            results['model_version'] = MODEL_VERSION
+            results['metadata'] = {
+                'request_id': request_id,
+                'model_name': MODEL_NAME,
+                'model_version': MODEL_VERSION,
+                'schema_version': _SCHEMA_VERSION,
+                'disclaimer': MODEL_DISCLAIMER,
+                'limitations': MODEL_LIMITATIONS,
+                'runtime_ms': {
+                    'simulation': simulation_runtime_ms,
+                    'total_request': total_runtime_ms,
+                },
+                'reproducible': bool(use_fixed_seed),
+                'seed_policy': 'fixed_seed_42' if use_fixed_seed else 'random_generator_default_rng',
+            }
+            logger.info(
+                "simulation_completed",
+                extra={
+                    "request_id": request_id,
+                    "event": "simulation_completed",
+                    "model_version": MODEL_VERSION,
+                    "duration_ms": total_runtime_ms,
+                    "path": request.path,
+                },
+            )
             
             return Response(results, status=status.HTTP_200_OK)
             
         except Exception as e:
-            logger.exception("Simulation request failed")
+            logger.exception(
+                "Simulation request failed",
+                extra={
+                    "request_id": request_id,
+                    "event": "simulation_failed",
+                    "model_version": MODEL_VERSION,
+                    "path": request.path,
+                },
+            )
             return Response(
-                {"error": "Simulation request failed."},
+                {
+                    "error": "Simulation request failed.",
+                    "request_id": request_id,
+                    "model_version": MODEL_VERSION,
+                    "disclaimer": MODEL_DISCLAIMER,
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -178,5 +223,13 @@ class HealthCheckView(APIView):
         return Response({
             "backend_version": _BACKEND_VERSION,
             "build_date": _BUILD_DATE,
-            "schema_version": _SCHEMA_VERSION
+            "schema_version": _SCHEMA_VERSION,
+            "model_name": MODEL_NAME,
+            "model_version": MODEL_VERSION,
+            "observability": {
+                "request_ids": True,
+                "structured_logging": True,
+                "error_tracking_configured": bool(settings.ERROR_TRACKING_DSN),
+            },
+            "disclaimer": MODEL_DISCLAIMER
         }, status=status.HTTP_200_OK)

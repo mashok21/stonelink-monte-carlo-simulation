@@ -8,6 +8,7 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
+*.log
 
 # Local Databases
 *.sqlite3
