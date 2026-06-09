@@ -35,9 +35,17 @@ class SimulationRequestSerializer(serializers.Serializer):
     include_audit = serializers.BooleanField(default=False)
 
     def validate(self, attrs):
-        if "annual_contribution" in attrs and "contribution_rate" not in self.initial_data:
+        if "annual_contribution" in attrs:
+            if "contribution_rate" in self.initial_data:
+                raise serializers.ValidationError({
+                    "annual_contribution": "Provide either 'contribution_rate' or 'annual_contribution', not both."
+                })
             attrs["contribution_rate"] = attrs["annual_contribution"]
-        if "annual_withdrawal" in attrs and "distribution_rate" not in self.initial_data:
+        if "annual_withdrawal" in attrs:
+            if "distribution_rate" in self.initial_data:
+                raise serializers.ValidationError({
+                    "annual_withdrawal": "Provide either 'distribution_rate' or 'annual_withdrawal', not both."
+                })
             attrs["distribution_rate"] = attrs["annual_withdrawal"]
 
         if attrs["withdrawal_start_year"] > attrs["years"]:

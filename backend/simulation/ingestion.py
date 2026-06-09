@@ -111,10 +111,15 @@ def parse_portfolio_excel():
     with _CACHE_LOCK:
         if _CACHE["path"] == filepath and _CACHE["mtime"] == mtime and _CACHE["data"] is not None:
             return _clone_excel_data(_CACHE["data"])
+        # Re-read mtime inside the lock to close the TOCTOU window before deciding to parse
+        mtime = os.path.getmtime(filepath)
+        if _CACHE["path"] == filepath and _CACHE["mtime"] == mtime and _CACHE["data"] is not None:
+            return _clone_excel_data(_CACHE["data"])
 
     data = _parse_portfolio_excel_uncached(filepath)
     with _CACHE_LOCK:
-        _CACHE.update({"path": filepath, "mtime": mtime, "data": _clone_excel_data(data)})
+        current_mtime = os.path.getmtime(filepath)
+        _CACHE.update({"path": filepath, "mtime": current_mtime, "data": _clone_excel_data(data)})
     return data
 
 
@@ -248,6 +253,16 @@ def _parse_portfolio_excel_uncached(filepath):
         df_corr = df_corr.reindex(index=asset_names, columns=asset_names)
         
         corr_matrix = df_corr.to_numpy(dtype=float)
+
+        # Detect assets that couldn't be matched in the correlation sheet (entire row/col would be NaN)
+        all_nan_rows = np.all(np.isnan(corr_matrix), axis=1)
+        if np.any(all_nan_rows):
+            missing = [asset_names[i] for i in np.where(all_nan_rows)[0]]
+            raise ValueError(
+                f"Correlation matrix is missing rows/columns for assets: {missing}. "
+                "Check that asset names in 'Asset Parameters' exactly match those in 'Correlation Matrix'."
+            )
+
         corr_matrix = np.nan_to_num(corr_matrix, nan=0.0)
         np.fill_diagonal(corr_matrix, 1.0)
         

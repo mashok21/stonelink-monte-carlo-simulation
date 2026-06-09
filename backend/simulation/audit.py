@@ -2,7 +2,10 @@ import numpy as np
 import datetime
 import os
 import json
+import logging
 from .engine import run_portfolio_simulation
+
+logger = logging.getLogger(__name__)
 
 def run_simulation_audit(params, results):
     warnings = []
@@ -189,7 +192,8 @@ def run_simulation_audit(params, results):
             expected_returns=zero_returns,
             volatilities=zero_vols,
             contribution_rate=0.0,
-            distribution_rate=0.0
+            distribution_rate=0.0,
+            inflation_rate=0.0,
         )
         
         # Terminal portfolio value should remain exactly initial value
@@ -198,19 +202,12 @@ def run_simulation_audit(params, results):
             test_results['test_7_zero_return'] = 'FAIL'
             warnings.append("Deterministic zero-return benchmark test failed.")
             
-        # Target nominal is initial_val * (1 + inflation)^years
-        t_nom = scenario_res['summary']['target_value_nominal']
+        # Scenario runs with inflation_rate=0, contribution_rate=0, distribution_rate=0 so
+        # target == initial_val and TVD == initial_val → success must be 100%
         s_nom = scenario_res['success_rate_terminal_nominal']
-        
-        if inflation > 0 and abs(t_nom - initial_val) > 0.01:
-            # target should be greater than initial value
-            if s_nom > 0.01: # Success must be 0% since TVD (initial_val) < Target
-                test_results['test_7_zero_return'] = 'FAIL'
-                warnings.append("Deterministic zero-return benchmark test failed.")
-        elif inflation == 0:
-            if s_nom < 99.9: # Success must be 100% since TVD (initial_val) == Target
-                test_results['test_7_zero_return'] = 'FAIL'
-                warnings.append("Deterministic zero-return benchmark test failed.")
+        if s_nom < 99.9:
+            test_results['test_7_zero_return'] = 'FAIL'
+            warnings.append("Deterministic zero-return benchmark test failed.")
     except Exception as e:
         test_results['test_7_zero_return'] = f'ERROR: {str(e)}'
         warnings.append(f"Audit Test 7 errored: {str(e)}")
@@ -283,6 +280,6 @@ def run_simulation_audit(params, results):
             }
             f.write(json.dumps(log_entry) + '\n')
     except Exception as log_ex:
-        print(f"Failed to write audit log: {log_ex}")
+        logger.warning("Failed to write audit log: %s", log_ex)
         
     return audit_report

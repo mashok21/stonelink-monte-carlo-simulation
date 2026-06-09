@@ -3,7 +3,6 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.conf import settings
 import numpy as np
-import subprocess
 import os
 import logging
 import time
@@ -15,27 +14,9 @@ from .model_metadata import MODEL_DISCLAIMER, MODEL_LIMITATIONS, MODEL_NAME, MOD
 
 logger = logging.getLogger(__name__)
 
-# Cache git commit info at server startup for high performance
-_BACKEND_VERSION = "unknown"
-_BUILD_DATE = "unknown"
 _SCHEMA_VERSION = SCHEMA_VERSION
-
-try:
-    _repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    _BACKEND_VERSION = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], 
-        cwd=_repo_dir, 
-        stderr=subprocess.DEVNULL
-    ).decode("utf-8").strip()
-    
-    _BUILD_DATE = subprocess.check_output(
-        ["git", "log", "-1", "--format=%cI"], 
-        cwd=_repo_dir, 
-        stderr=subprocess.DEVNULL
-    ).decode("utf-8").strip()
-except Exception:
-    _BACKEND_VERSION = "unknown"
-    _BUILD_DATE = "unknown"
+_BACKEND_VERSION = os.environ.get("GIT_COMMIT", "unknown")
+_BUILD_DATE = os.environ.get("GIT_COMMIT_DATE", "unknown")
 
 class SimulatePortfolioView(APIView):
     throttle_scope = "simulation"

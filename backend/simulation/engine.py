@@ -119,12 +119,16 @@ def run_portfolio_simulation(
             a_class = asset_classes[j] if (asset_classes is not None and j < len(asset_classes)) else 'equity'
             if a_class == 'equity':
                 X[:, :, j] = X[:, :, j] / scale_factors[:, :, 0]
-                # Inject a slight downward shift/drift during Stress Test to simulate a market crash
-                # Let's subtract a small crash premium of 2.0% pa to stress test the portfolios
-                X[:, :, j] -= 0.02
 
     # Scale to expected returns and adjusted volatilities
     sim_returns = expected_returns + X * vols_adjusted
+
+    # Apply flat 2% pa crash drag to equity returns in stress mode (post-scaling so drag is vol-independent)
+    if environment_mode == 'MARKET_STRESS':
+        for j in range(num_assets):
+            a_class = asset_classes[j] if (asset_classes is not None and j < len(asset_classes)) else 'equity'
+            if a_class == 'equity':
+                sim_returns[:, :, j] -= 0.02
     
     # Matrix to store portfolio values over time (years 0 to years)
     # Shape: (num_trials, years + 1)
@@ -168,7 +172,7 @@ def run_portfolio_simulation(
         
         # Update masks based on solvency policy (Layer 1 check)
         min_reserve_val = min_reserve_threshold_ratio * initial_portfolio_value
-        if min_reserve_val <= 0 or not enable_hard_liquidation:
+        if not enable_hard_liquidation or min_reserve_val <= 0:
             newly_failed = active_mask & (final_vals_t <= 0)
             active_mask = active_mask & (final_vals_t > 0)
         else: # Hard Liquidation enabled
