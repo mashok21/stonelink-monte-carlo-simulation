@@ -35,9 +35,15 @@ def run_simulation_audit(params, results):
     dist_rate = params.get('distribution_rate', 0.04)
     years = params.get('years', 30)
     withdrawal_start_year = params.get('withdrawal_start_year', 15)
+    target_mode = params.get('target_mode', 'default')
+    target_hurdle = params.get('target_hurdle')
     
-    base_success_nom = results['success_rate_terminal_nominal']
-    base_target_nom = results['summary']['target_value_nominal']
+    # Run a matched 200-trial baseline to eliminate random trial-size/seed noise
+    base_res_200 = run_scenario()
+    base_success_nom = base_res_200['success_rate_terminal_nominal']
+    base_success_real = base_res_200['success_rate_terminal_real']
+    base_target_nom = base_res_200['summary']['target_value_nominal']
+    base_target_real = base_res_200['summary']['target_value_real']
     
     # ----------------------------------------------------
     # AUDIT TEST 1: INFLATION SENSITIVITY
@@ -46,17 +52,21 @@ def run_simulation_audit(params, results):
     if inflation > 0:
         try:
             scenario_res = run_scenario(inflation_rate=0.0)
-            target_zero = scenario_res['summary']['target_value_nominal']
-            success_zero = scenario_res['success_rate_terminal_nominal']
             
-            # Target must be strictly lower with 0% inflation
-            target_decreased = target_zero < base_target_nom
-            # Success must be higher or equal with 0% inflation (lower target is easier to meet)
-            success_increased_or_equal = success_zero >= base_success_nom - 0.01
-            
-            if not (target_decreased and success_increased_or_equal):
-                test_results['test_1_inflation_sensitivity'] = 'FAIL'
-                warnings.append("Inflation input may not be affecting success calculations.")
+            if target_mode == 'custom':
+                success_zero_real = scenario_res['success_rate_terminal_real']
+                success_increased_or_equal = success_zero_real >= base_success_real - 0.0001
+                if not success_increased_or_equal:
+                    test_results['test_1_inflation_sensitivity'] = 'FAIL'
+                    warnings.append("Inflation input may not be affecting success calculations.")
+            else:
+                target_zero = scenario_res['summary']['target_value_nominal']
+                success_zero = scenario_res['success_rate_terminal_nominal']
+                target_decreased = target_zero < base_target_nom
+                success_increased_or_equal = success_zero >= base_success_nom - 0.0001
+                if not (target_decreased and success_increased_or_equal):
+                    test_results['test_1_inflation_sensitivity'] = 'FAIL'
+                    warnings.append("Inflation input may not be affecting success calculations.")
         except Exception as e:
             test_results['test_1_inflation_sensitivity'] = f'ERROR: {str(e)}'
             warnings.append(f"Audit Test 1 errored: {str(e)}")
@@ -75,10 +85,10 @@ def run_simulation_audit(params, results):
             zero_succ = zero_scenario_res['success_rate_terminal_nominal']
             
             # With zero distributions, success rate must be higher or equal
-            if zero_succ < base_succ - 0.01:
+            if zero_succ < base_succ - 0.0001:
                 test_results['test_2_distribution_sensitivity'] = 'FAIL'
                 warnings.append("Distribution parameter appears disconnected from success calculations.")
-            elif abs(zero_succ - base_succ) < 0.1 and 0.1 < base_succ < 99.9:
+            elif abs(zero_succ - base_succ) < 0.0001 and 0.1 < base_succ < 99.9:
                 test_results['test_2_distribution_sensitivity'] = 'FAIL'
                 warnings.append("Distribution parameter appears disconnected from success calculations.")
         except Exception as e:
@@ -90,14 +100,17 @@ def run_simulation_audit(params, results):
     # ----------------------------------------------------
     test_results['test_3_extreme_distribution'] = 'PASS'
     try:
-        # We run in terminal_assets mode to check that the portfolio assets decline significantly
-        base_scenario_res = run_scenario(success_mode='terminal_assets')
-        extreme_scenario_res = run_scenario(distribution_rate=0.25, contribution_rate=0.0, success_mode='terminal_assets')
-        
+        if dist_rate >= 0.25:
+            base_scenario_res = run_scenario(distribution_rate=0.04, success_mode='terminal_assets')
+            extreme_scenario_res = run_scenario(contribution_rate=0.0, success_mode='terminal_assets')
+        else:
+            base_scenario_res = run_scenario(success_mode='terminal_assets')
+            extreme_scenario_res = run_scenario(distribution_rate=0.25, contribution_rate=0.0, success_mode='terminal_assets')
+            
         base_succ = base_scenario_res['success_rate_terminal_nominal']
         extreme_succ = extreme_scenario_res['success_rate_terminal_nominal']
         
-        # Success should drop significantly under 25% distribution rate
+        # Success should drop significantly under extreme distribution rate
         if extreme_succ >= base_succ - 2.0 and base_succ > 5.0:
             test_results['test_3_extreme_distribution'] = 'FAIL'
             warnings.append("Distribution cash flows may not be applied correctly.")
@@ -110,20 +123,40 @@ def run_simulation_audit(params, results):
     # ----------------------------------------------------
     test_results['test_4_extreme_inflation'] = 'PASS'
     try:
-        scenario_res = run_scenario(inflation_rate=0.15)
-        target_ext = scenario_res['summary']['target_value_nominal']
-        success_ext = scenario_res['success_rate_terminal_nominal']
-        
-        # Target must increase dramatically and success should decrease
-        target_increased = target_ext > base_target_nom
-        success_decreased = success_ext <= base_success_nom + 0.01
-        
-        if not target_increased:
-            test_results['test_4_extreme_inflation'] = 'FAIL'
-            warnings.append("Inflation target adjustment not detected.")
-        elif success_ext >= base_success_nom - 2.0 and base_success_nom > 5.0:
-            test_results['test_4_extreme_inflation'] = 'FAIL'
-            warnings.append("Inflation target adjustment not detected.")
+        if inflation >= 0.15:
+            standard_res = run_scenario(inflation_rate=0.03)
+            extreme_res = base_res_200
+        else:
+            standard_res = base_res_200
+            extreme_res = run_scenario(inflation_rate=0.15)
+            
+        if target_mode == 'custom':
+            ext_success = extreme_res['success_rate_terminal_real']
+            std_success = standard_res['success_rate_terminal_real']
+            
+            success_decreased_or_equal = ext_success <= std_success + 0.0001
+            success_dropped_if_possible = True
+            if std_success > 5.0:
+                success_dropped_if_possible = ext_success < std_success - 2.0
+                
+            if not (success_decreased_or_equal and success_dropped_if_possible):
+                test_results['test_4_extreme_inflation'] = 'FAIL'
+                warnings.append("Inflation target adjustment not detected.")
+        else:
+            ext_target = extreme_res['summary']['target_value_nominal']
+            std_target = standard_res['summary']['target_value_nominal']
+            ext_success = extreme_res['success_rate_terminal_nominal']
+            std_success = standard_res['success_rate_terminal_nominal']
+            
+            target_increased = ext_target > std_target
+            success_decreased_or_equal = ext_success <= std_success + 0.0001
+            success_dropped_if_possible = True
+            if std_success > 5.0:
+                success_dropped_if_possible = ext_success < std_success - 2.0
+                
+            if not target_increased or not (success_decreased_or_equal and success_dropped_if_possible):
+                test_results['test_4_extreme_inflation'] = 'FAIL'
+                warnings.append("Inflation target adjustment not detected.")
     except Exception as e:
         test_results['test_4_extreme_inflation'] = f'ERROR: {str(e)}'
         warnings.append(f"Audit Test 4 errored: {str(e)}")
@@ -141,8 +174,8 @@ def run_simulation_audit(params, results):
             targets.append(res['summary']['target_value_nominal'])
             successes.append(res['success_rate_terminal_nominal'])
             
-        # Target values must increase with horizon (if inflation > 0)
-        if inflation > 0:
+        # Target values must increase with horizon (if inflation > 0 and not custom mode)
+        if inflation > 0 and target_mode != 'custom':
             targets_ordered = all(targets[i] < targets[i+1] for i in range(len(targets)-1))
             if not targets_ordered:
                 test_results['test_5_projection_horizon'] = 'FAIL'
@@ -161,13 +194,7 @@ def run_simulation_audit(params, results):
     # ----------------------------------------------------
     test_results['test_6_path_level_validation'] = 'PASS'
     try:
-        # If success is calculated path-by-path, a scenario where the target hurdle is set
-        # exactly to the median TVD of the portfolio should result in a success rate of
-        # approximately 50% (since half the paths are above the median and half below).
-        # However, if success was derived from the median (e.g., success = 100% if median >= hurdle),
-        # then setting the hurdle to the median would result in a binary 100% success rate.
-        # We verify that the success probability is not 0% or 100% under this hurdle.
-        median_tvd = results['summary']['median_tvd_nominal']
+        median_tvd = base_res_200['summary']['median_tvd_nominal']
         test_res = run_scenario(target_hurdle=median_tvd, target_mode='custom')
         test_success = test_res['success_rate_terminal_nominal']
         
@@ -192,8 +219,7 @@ def run_simulation_audit(params, results):
             expected_returns=zero_returns,
             volatilities=zero_vols,
             contribution_rate=0.0,
-            distribution_rate=0.0,
-            inflation_rate=0.0,
+            distribution_rate=0.0
         )
         
         # Terminal portfolio value should remain exactly initial value
@@ -202,12 +228,29 @@ def run_simulation_audit(params, results):
             test_results['test_7_zero_return'] = 'FAIL'
             warnings.append("Deterministic zero-return benchmark test failed.")
             
-        # Scenario runs with inflation_rate=0, contribution_rate=0, distribution_rate=0 so
-        # target == initial_val and TVD == initial_val → success must be 100%
         s_nom = scenario_res['success_rate_terminal_nominal']
-        if s_nom < 99.9:
-            test_results['test_7_zero_return'] = 'FAIL'
-            warnings.append("Deterministic zero-return benchmark test failed.")
+        
+        if target_mode == 'custom':
+            hurdle = target_hurdle if target_hurdle is not None else initial_val
+            if hurdle > initial_val:
+                if s_nom > 0.01:
+                    test_results['test_7_zero_return'] = 'FAIL'
+                    warnings.append("Deterministic zero-return benchmark test failed.")
+            else:
+                if s_nom < 99.9:
+                    test_results['test_7_zero_return'] = 'FAIL'
+                    warnings.append("Deterministic zero-return benchmark test failed.")
+        else:
+            t_nom = scenario_res['summary']['target_value_nominal']
+            if inflation > 0 and abs(t_nom - initial_val) > 0.01:
+                # target should be greater than initial value
+                if s_nom > 0.01: # Success must be 0% since TVD (initial_val) < Target
+                    test_results['test_7_zero_return'] = 'FAIL'
+                    warnings.append("Deterministic zero-return benchmark test failed.")
+            elif inflation == 0:
+                if s_nom < 99.9: # Success must be 100% since TVD (initial_val) == Target
+                    test_results['test_7_zero_return'] = 'FAIL'
+                    warnings.append("Deterministic zero-return benchmark test failed.")
     except Exception as e:
         test_results['test_7_zero_return'] = f'ERROR: {str(e)}'
         warnings.append(f"Audit Test 7 errored: {str(e)}")
