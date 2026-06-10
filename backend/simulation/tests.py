@@ -378,4 +378,119 @@ class PortfolioSimulationTestCase(TestCase):
         else:
             self.assertIn('error', wb_data)
 
+    def test_audit_passes_under_market_stress(self):
+        """Test include_audit=True under MARKET_STRESS environment does not raise false FAIL due to Test 7/Test 6/Test 2."""
+        payload = {
+            "initial_portfolio_value": 100000,
+            "years": 30,
+            "num_trials": 200,
+            "portfolio_type": "Balanced",
+            "environment_mode": "MARKET_STRESS",
+            "contribution_rate": 3.0,
+            "distribution_rate": 4.0,
+            "withdrawal_start_year": 15,
+            "include_audit": True
+        }
+        response = self.client.post(self.url, data=payload, content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        res_data = response.json()
+        self.assertIn('audit_report', res_data)
+        audit = res_data['audit_report']
+        self.assertEqual(audit['status'], 'PASS', f"Audit failed: {audit['warnings']}")
+
+    def test_audit_passes_under_solvency_dominated_withdrawal(self):
+        """Test include_audit=True under extreme withdrawal rates does not raise false FAIL for Test 6."""
+        payload = {
+            "initial_portfolio_value": 100000,
+            "years": 30,
+            "num_trials": 200,
+            "portfolio_type": "Balanced",
+            "environment_mode": "STANDARD_CRUISE",
+            "contribution_rate": 0.0,
+            "distribution_rate": 50.0,  # Extreme distribution rate to force solvency failures on all paths
+            "withdrawal_start_year": 0,
+            "include_audit": True
+        }
+        response = self.client.post(self.url, data=payload, content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        res_data = response.json()
+        self.assertIn('audit_report', res_data)
+        audit = res_data['audit_report']
+        self.assertEqual(audit['status'], 'PASS', f"Audit failed: {audit['warnings']}")
+
+    def test_audit_can_fail_on_genuine_invariant_violation(self):
+        """Verify that audit status can still fail if a genuine invariant is violated."""
+        from . import audit
+        
+        # Test 8 expects that if we run scenario with distribution_rate=1.0, success rate terminal nominal should be <= 0.01.
+        # But if the simulation engine was broken and returned 100.0% success rate:
+        params = {
+            'initial_portfolio_value': 100000,
+            'years': 10,
+            'contribution_rate': 0.0,
+            'distribution_rate': 0.04,
+            'withdrawal_start_year': 5,
+            'inflation_rate': 0.03,
+            'allocations': np.array([1.0]),
+            'expected_returns': np.array([0.05]),
+            'volatilities': np.array([0.1]),
+            'correlation_matrix': np.array([[1.0]]),
+            'target_mode': 'default',
+            'success_mode': 'total_value',
+            'min_reserve_threshold_ratio': 0.20,
+            'success_framework': 'institutional_sustainability',
+            'enable_hard_liquidation': False
+        }
+        
+        # Let's mock run_portfolio_simulation in audit module to return 100% success for all runs.
+        # This will violate Test 8 since success_extinction will be 100.0% (> 0.01).
+        with patch.object(audit, 'run_portfolio_simulation') as mock_run:
+            mock_run.return_value = {
+                'years_list': list(range(11)),
+                'success_rates': [100.0] * 11,
+                'success_rates_nominal': [100.0] * 11,
+                'success_rates_real': [100.0] * 11,
+                'success_rate_terminal': 100.0,
+                'success_rate_terminal_nominal': 100.0,
+                'success_rate_terminal_real': 100.0,
+                'beating_inflation_rate': 100.0,
+                'avg_failure_year': None,
+                'nominal_paths': {'p50': [100000.0] * 11},
+                'real_paths': {'p50': [100000.0] * 11},
+                'histogram': [],
+                'prob_reserve_breach': 0.0,
+                'median_first_breach_year': None,
+                'median_minimum_assets': 100000.0,
+                'pct_paths_below_threshold': 0.0,
+                'summary': {
+                    'initial_value': 100000,
+                    'target_hurdle': 100000,
+                    'success_mode': 'total_value',
+                    'target_mode': 'default',
+                    'min_reserve_threshold_ratio': 0.20,
+                    'success_framework': 'institutional_sustainability',
+                    'enable_hard_liquidation': False,
+                    'median_terminal_nominal': 100000.0,
+                    'median_terminal_real': 100000.0,
+                    'p10_terminal_nominal': 100000.0,
+                    'p90_terminal_nominal': 100000.0,
+                    'median_distributions_nominal': 0.0,
+                    'median_distributions_real': 0.0,
+                    'median_tvd_nominal': 100000.0,
+                    'median_tvd_real': 100000.0,
+                    'target_value_nominal': 130000.0,
+                    'target_value_real': 100000.0,
+                    'prob_reserve_breach': 0.0,
+                    'median_first_breach_year': None,
+                    'median_minimum_assets': 100000.0,
+                    'pct_paths_below_threshold': 0.0
+                }
+            }
+            
+            audit_report = audit.run_simulation_audit(params, results={})
+            self.assertEqual(audit_report['status'], 'FAIL')
+            self.assertIn('test_8_extinction', audit_report['test_results'])
+            self.assertEqual(audit_report['test_results']['test_8_extinction'], 'FAIL')
+
+
 

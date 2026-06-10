@@ -77,9 +77,21 @@ def run_simulation_audit(params, results):
     test_results['test_2_distribution_sensitivity'] = 'PASS'
     if dist_rate > 0 and years > withdrawal_start_year:
         try:
-            # We run both baseline and zero-distribution in terminal_assets mode to isolate assets impact
-            base_scenario_res = run_scenario(success_mode='terminal_assets')
-            zero_scenario_res = run_scenario(distribution_rate=0.0, success_mode='terminal_assets')
+            # We run both baseline and zero-distribution in terminal_assets mode to isolate assets impact.
+            # Pin to STANDARD_CRUISE, default target mode, and terminal_assets framework to avoid stress mode volatility and custom hurdles.
+            base_scenario_res = run_scenario(
+                environment_mode='STANDARD_CRUISE',
+                target_mode='default',
+                success_framework='terminal_assets',
+                success_mode='terminal_assets'
+            )
+            zero_scenario_res = run_scenario(
+                distribution_rate=0.0,
+                environment_mode='STANDARD_CRUISE',
+                target_mode='default',
+                success_framework='terminal_assets',
+                success_mode='terminal_assets'
+            )
             
             base_succ = base_scenario_res['success_rate_terminal_nominal']
             zero_succ = zero_scenario_res['success_rate_terminal_nominal']
@@ -194,8 +206,22 @@ def run_simulation_audit(params, results):
     # ----------------------------------------------------
     test_results['test_6_path_level_validation'] = 'PASS'
     try:
-        median_tvd = base_res_200['summary']['median_tvd_nominal']
-        test_res = run_scenario(target_hurdle=median_tvd, target_mode='custom')
+        # Isolate path-level validation from solvency and cash flow depletion
+        base_test_res = run_scenario(
+            distribution_rate=0.0,
+            contribution_rate=0.0,
+            min_reserve_threshold_ratio=0.0,
+            success_framework='terminal_assets'
+        )
+        median_tvd = base_test_res['summary']['median_tvd_nominal']
+        test_res = run_scenario(
+            target_hurdle=median_tvd,
+            target_mode='custom',
+            distribution_rate=0.0,
+            contribution_rate=0.0,
+            min_reserve_threshold_ratio=0.0,
+            success_framework='terminal_assets'
+        )
         test_success = test_res['success_rate_terminal_nominal']
         
         if test_success <= 5.0 or test_success >= 95.0:
@@ -215,11 +241,13 @@ def run_simulation_audit(params, results):
         zero_returns = np.zeros(n_assets)
         zero_vols = np.zeros(n_assets)
         
+        # Pin environment_mode to STANDARD_CRUISE so that the stress/crash drag is not applied
         scenario_res = run_scenario(
             expected_returns=zero_returns,
             volatilities=zero_vols,
             contribution_rate=0.0,
-            distribution_rate=0.0
+            distribution_rate=0.0,
+            environment_mode='STANDARD_CRUISE'
         )
         
         # Terminal portfolio value should remain exactly initial value

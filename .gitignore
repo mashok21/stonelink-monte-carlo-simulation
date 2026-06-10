@@ -34,3 +34,6 @@ Thumbs.db
 # Exclude nested frontend repository
 frontend/
 
+# Runtime audit logs
+backend/simulation_audit.log
+
