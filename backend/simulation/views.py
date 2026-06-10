@@ -201,6 +201,7 @@ class SimulatePortfolioView(APIView):
 
 def get_workbook_metadata():
     import hashlib
+    import datetime
     try:
         from .ingestion import get_excel_path
         filepath = get_excel_path()
