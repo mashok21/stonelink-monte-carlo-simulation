@@ -350,7 +350,7 @@ class PortfolioSimulationTestCase(TestCase):
         self.assertIsNot(first['expected_returns'], second['expected_returns'])
 
     def test_health_check_endpoint(self):
-        """Test that the health check endpoint returns git commit info and schema version."""
+        """Test that the health check endpoint returns git commit info, schema version, and workbook metadata."""
         url = reverse('health')
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -362,5 +362,20 @@ class PortfolioSimulationTestCase(TestCase):
         self.assertEqual(data['model_version'], MODEL_VERSION)
         self.assertTrue(data['observability']['request_ids'])
         self.assertTrue(data['observability']['structured_logging'])
+
+        # Assert workbook metadata is present
+        self.assertIn('portfolio_workbook', data)
+        wb_data = data['portfolio_workbook']
+        self.assertEqual(wb_data['filename'], 'portfolio_data.xlsx')
+        self.assertEqual(wb_data['relative_path'], 'simulation/portfolio_data.xlsx')
+
+        if wb_data['available']:
+            self.assertIn('sha256', wb_data)
+            self.assertEqual(len(wb_data['sha256']), 64)
+            self.assertIn('size_bytes', wb_data)
+            self.assertIn('last_modified_utc', wb_data)
+            self.assertTrue(wb_data['last_modified_utc'].endswith('Z'))
+        else:
+            self.assertIn('error', wb_data)
 
 

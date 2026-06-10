@@ -199,6 +199,58 @@ class SimulatePortfolioView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+def get_workbook_metadata():
+    import hashlib
+    try:
+        from .ingestion import get_excel_path
+        filepath = get_excel_path()
+    except Exception as e:
+        return {
+            "filename": "portfolio_data.xlsx",
+            "relative_path": "simulation/portfolio_data.xlsx",
+            "available": False,
+            "error": f"Path lookup failed: {str(e)}"
+        }
+
+    if not os.path.exists(filepath):
+        return {
+            "filename": "portfolio_data.xlsx",
+            "relative_path": "simulation/portfolio_data.xlsx",
+            "available": False,
+            "error": "Workbook file not found"
+        }
+
+    try:
+        # File size
+        size_bytes = os.path.getsize(filepath)
+        
+        # Last modified time in UTC, formatted explicitly as YYYY-MM-DDTHH:MM:SSZ
+        mtime = os.path.getmtime(filepath)
+        last_modified_utc = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        
+        # SHA-256
+        sha256_hash = hashlib.sha256()
+        with open(filepath, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        sha256 = sha256_hash.hexdigest()
+        
+        return {
+            "filename": os.path.basename(filepath),
+            "relative_path": "simulation/portfolio_data.xlsx",
+            "sha256": sha256,
+            "size_bytes": size_bytes,
+            "last_modified_utc": last_modified_utc,
+            "available": True
+        }
+    except Exception as e:
+        return {
+            "filename": "portfolio_data.xlsx",
+            "relative_path": "simulation/portfolio_data.xlsx",
+            "available": False,
+            "error": f"Failed to read file details: {str(e)}"
+        }
+
 class HealthCheckView(APIView):
     def get(self, request):
         return Response({
@@ -212,5 +264,6 @@ class HealthCheckView(APIView):
                 "structured_logging": True,
                 "error_tracking_configured": bool(settings.ERROR_TRACKING_DSN),
             },
-            "disclaimer": MODEL_DISCLAIMER
+            "disclaimer": MODEL_DISCLAIMER,
+            "portfolio_workbook": get_workbook_metadata()
         }, status=status.HTTP_200_OK)
