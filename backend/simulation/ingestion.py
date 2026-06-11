@@ -1,8 +1,11 @@
 import os
 import threading
+import logging
 import pandas as pd
 import numpy as np
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 EXCEL_PATH = os.path.join(settings.BASE_DIR, 'simulation', 'portfolio_data.xlsx')
 _CACHE_LOCK = threading.Lock()
@@ -326,5 +329,5 @@ def _parse_portfolio_excel_uncached(filepath):
         }
         
     except Exception as e:
-        print(f"Error parsing Excel file: {e}")
+        logger.exception("Error parsing Excel file: %s", e)
         raise e

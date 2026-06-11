@@ -199,12 +199,19 @@ class SimulatePortfolioView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+_WORKBOOK_HASH_CACHE = {
+    "mtime": None,
+    "size": None,
+    "sha256": None,
+}
+
 def get_workbook_metadata():
     import hashlib
     import datetime
     try:
         from .ingestion import get_excel_path
         filepath = get_excel_path()
+        relative_path = os.path.relpath(filepath, start=settings.BASE_DIR).replace(os.sep, "/")
     except Exception as e:
         return {
             "filename": "portfolio_data.xlsx",
@@ -215,8 +222,8 @@ def get_workbook_metadata():
 
     if not os.path.exists(filepath):
         return {
-            "filename": "portfolio_data.xlsx",
-            "relative_path": "simulation/portfolio_data.xlsx",
+            "filename": os.path.basename(filepath),
+            "relative_path": relative_path,
             "available": False,
             "error": "Workbook file not found"
         }
@@ -229,16 +236,25 @@ def get_workbook_metadata():
         mtime = os.path.getmtime(filepath)
         last_modified_utc = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         
-        # SHA-256
-        sha256_hash = hashlib.sha256()
-        with open(filepath, "rb") as f:
-            for byte_block in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(byte_block)
-        sha256 = sha256_hash.hexdigest()
+        # Check cache before recalculating SHA-256
+        if (_WORKBOOK_HASH_CACHE["mtime"] == mtime and 
+            _WORKBOOK_HASH_CACHE["size"] == size_bytes and 
+            _WORKBOOK_HASH_CACHE["sha256"] is not None):
+            sha256 = _WORKBOOK_HASH_CACHE["sha256"]
+        else:
+            sha256_hash = hashlib.sha256()
+            with open(filepath, "rb") as f:
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(byte_block)
+            sha256 = sha256_hash.hexdigest()
+            # Update cache
+            _WORKBOOK_HASH_CACHE["mtime"] = mtime
+            _WORKBOOK_HASH_CACHE["size"] = size_bytes
+            _WORKBOOK_HASH_CACHE["sha256"] = sha256
         
         return {
             "filename": os.path.basename(filepath),
-            "relative_path": "simulation/portfolio_data.xlsx",
+            "relative_path": relative_path,
             "sha256": sha256,
             "size_bytes": size_bytes,
             "last_modified_utc": last_modified_utc,
@@ -246,8 +262,8 @@ def get_workbook_metadata():
         }
     except Exception as e:
         return {
-            "filename": "portfolio_data.xlsx",
-            "relative_path": "simulation/portfolio_data.xlsx",
+            "filename": os.path.basename(filepath),
+            "relative_path": relative_path,
             "available": False,
             "error": f"Failed to read file details: {str(e)}"
         }
