@@ -88,14 +88,7 @@ Uses correlated normal draws with expected returns and adjusted volatilities.
 
 ### MARKET_STRESS
 
-For assets classified as `equity`, the model applies a Student-t style fat-tail transform:
-
-```text
-W ~ ChiSquare(df=4)
-scale = sqrt(W / 4)
-X_equity = X_equity / scale
-X_equity = X_equity - 0.02
-```
+In MARKET_STRESS mode, assets classified as equity by the backend receive Student-t shocks with 4 degrees of freedom. A flat -2.0% annual crash-drag adjustment is then applied to the simulated return for those equity-classified assets.
 
 Fixed income and private assets remain normal in the current implementation.
 

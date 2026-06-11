@@ -63,8 +63,22 @@ Whenever changes are deployed to the backend, verify the deployment using the fo
 4. **CORS Validation**:
    Inspect the browser developer console during the manual scenario run to confirm there are no CORS or origin blockages.
 
----
+## 6. Workbook Metadata Exposure
 
-## 6. Future Improvements
+The `/health` endpoint exposes read-only metadata about the active workbook configuration. This payload includes:
 
-* **Workbook Metadata Disclosure**: In future database architecture passes, the `/health` or `/simulation` response can be extended to dynamically expose the active workbook's filename, last modification timestamp, and SHA-256 hash to the client. This is currently not implemented.
+```json
+{
+  "portfolio_workbook": {
+    "filename": "portfolio_data.xlsx",
+    "relative_path": "simulation/portfolio_data.xlsx",
+    "sha256": "...",
+    "size_bytes": 29289,
+    "last_modified_utc": "...",
+    "available": true
+  }
+}
+```
+
+This read-only metadata assists in confirming the specific workbook file version being utilized by the deployed backend. It does not validate investment assumptions, and does not represent independent model validation.
+

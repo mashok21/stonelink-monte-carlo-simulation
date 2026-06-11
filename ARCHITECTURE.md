@@ -57,21 +57,21 @@ The frontend displays disclaimers, but the backend also includes disclaimer meta
 
 ## Deployment Shape
 
-Frontend:
+The deployment configuration uses a split hosting architecture:
 
-- Vercel static Vite deployment
-- output directory: `dist`
-- SPA fallback via `vercel.json`
+- **Frontend**: Vercel React/Vite static frontend.
+  - Vercel hosts the frontend assets only.
+  - SPA fallback route is managed via `vercel.json`.
+- **Backend**: Railway-hosted Django/DRF API served by Gunicorn.
+  - Railway is the active backend deployment path.
+  - The start command and build steps are defined in `railway.json`.
+- **Workbook**: `backend/simulation/portfolio_data.xlsx` (located on the backend filesystem as the local data source).
 
-Backend:
-
-- Django WSGI exposed through `api/index.py`
-- Vercel Python runtime
-- function rewrites in `vercel.json`
+*Note: Any past configurations referring to Vercel Python runtime or serverless backend functions are legacy/stale and no longer represent the active deployment architecture.*
 
 ## Known Architecture Limits
 
 - Simulations are synchronous.
 - CPU-heavy requests compete with normal API traffic.
-- Vercel serverless is not ideal for long-running quantitative compute.
-- SQLite on `/tmp` is suitable only for ephemeral runtime compatibility, not durable state.
+- Quantitative computing resource limits are governed by the hosting container.
+

@@ -10,11 +10,16 @@ Production Railway uses the Git-tracked workbook bundled with the backend deploy
 
 Do not change the workbook contents without a separate approved workbook-change task.
 
-## Future Improvement & API Exposure
+## Current Workbook Metadata Exposure
 
-In future releases, the backend API can be extended to dynamically expose:
-* Ingested workbook filename
-* Workbook version / date stamp
-* Workbook SHA-256 hash or checksum
+The canonical workbook is `backend/simulation/portfolio_data.xlsx`.
+The backend `/health` endpoint dynamically exposes the following metadata:
+- Filename
+- Relative path
+- SHA-256 hash
+- File size (bytes)
+- Last modified UTC timestamp
+- Availability status
 
-This metadata will allow the frontend to confirm alignment and track when the underlying workbook assumptions are updated.
+The workbook itself remains the source of assumptions. Updating workbook contents is a separate controlled task and should not be done casually.
+
